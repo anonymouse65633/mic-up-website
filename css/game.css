@@ -1,6 +1,5 @@
 /* ============================================================
    WalkWorld 3D — game.css
-   In-game UI: canvas, pointer-lock, crosshair, HUD, chat
    ============================================================ */
 
 .game-page {
@@ -17,7 +16,6 @@
   overflow: hidden;
 }
 
-/* ── Three.js canvas fills viewport ── */
 #gameCanvas {
   display: block;
   width: 100%;
@@ -25,9 +23,7 @@
   outline: none;
 }
 
-/* ============================================================
-   OVERLAYS (shared base)
-   ============================================================ */
+/* ── Overlays ── */
 .overlay {
   position: fixed; inset: 0; z-index: 100;
   display: flex;
@@ -37,7 +33,6 @@
   backdrop-filter: blur(4px);
 }
 
-/* ── Loading overlay ── */
 .loading-box {
   text-align: center;
   display: flex;
@@ -73,13 +68,8 @@
   border-radius: 4px;
   transition: width .3s ease;
 }
-.load-status {
-  font-size: 18px;
-  color: var(--c-muted);
-  letter-spacing: 2px;
-}
+.load-status { font-size: 18px; color: var(--c-muted); letter-spacing: 2px; }
 
-/* ── Disconnected overlay ── */
 .disc-overlay { background: rgba(13,13,26,.97); }
 .disc-box {
   text-align: center;
@@ -110,7 +100,6 @@
 .disc-back { font-size: 16px; color: var(--c-muted); text-decoration: none; }
 .disc-back:hover { color: var(--c-text); }
 
-/* ── Pointer-lock overlay ── */
 .lock-overlay {
   position: fixed; inset: 0; z-index: 50;
   display: flex;
@@ -139,20 +128,10 @@
   50%      { border-color: var(--c-accent2); }
 }
 .lock-icon  { font-size: 40px; }
-.lock-title {
-  font-family: var(--font-pixel);
-  font-size: 13px;
-  color: var(--c-accent);
-  letter-spacing: 2px;
-}
-.lock-sub {
-  font-size: 17px;
-  color: var(--c-muted);
-}
+.lock-title { font-family: var(--font-pixel); font-size: 13px; color: var(--c-accent); letter-spacing: 2px; }
+.lock-sub   { font-size: 17px; color: var(--c-muted); }
 
-/* ============================================================
-   CROSSHAIR
-   ============================================================ */
+/* ── Crosshair ── */
 .crosshair {
   position: absolute;
   top: 50%; left: 50%;
@@ -166,20 +145,10 @@
   background: rgba(255,255,255,0.85);
   border-radius: 1px;
 }
-.ch-h {
-  width: 16px; height: 2px;
-  top: 50%; left: 50%;
-  transform: translate(-50%, -50%);
-}
-.ch-v {
-  width: 2px; height: 16px;
-  top: 50%; left: 50%;
-  transform: translate(-50%, -50%);
-}
+.ch-h { width: 16px; height: 2px; top: 50%; left: 50%; transform: translate(-50%, -50%); }
+.ch-v { width: 2px; height: 16px; top: 50%; left: 50%; transform: translate(-50%, -50%); }
 
-/* ============================================================
-   HUD
-   ============================================================ */
+/* ── HUD ── */
 .hud {
   position: absolute;
   z-index: 10;
@@ -187,7 +156,6 @@
   user-select: none;
 }
 
-/* ── Top-left: player info ── */
 .hud-tl {
   top: 14px; left: 14px;
   display: flex;
@@ -205,31 +173,11 @@
   border: 2px solid #fff;
   flex-shrink: 0;
 }
-.hud-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.hud-name {
-  font-family: var(--font-pixel);
-  font-size: 9px;
-  color: var(--c-text);
-  letter-spacing: 1px;
-}
-.hud-pos {
-  font-size: 14px;
-  color: var(--c-muted);
-  letter-spacing: 1px;
-}
-.hud-zone {
-  font-size: 13px;
-  color: var(--c-accent);
-  letter-spacing: 1px;
-  font-family: var(--font-pixel);
-  font-size: 7px;
-}
+.hud-info { display: flex; flex-direction: column; gap: 2px; }
+.hud-name { font-family: var(--font-pixel); font-size: 9px; color: var(--c-text); letter-spacing: 1px; }
+.hud-pos  { font-size: 14px; color: var(--c-muted); letter-spacing: 1px; }
+.hud-zone { font-family: var(--font-pixel); font-size: 7px; color: var(--c-accent); letter-spacing: 1px; }
 
-/* ── Top-right: online count ── */
 .hud-tr {
   top: 14px; right: 14px;
   display: flex;
@@ -244,7 +192,6 @@
   color: var(--c-text);
 }
 
-/* ── Bottom-left: compass + controls ── */
 .hud-bl {
   position: absolute;
   bottom: 14px; left: 14px;
@@ -294,9 +241,7 @@
   backdrop-filter: blur(4px);
 }
 
-/* ============================================================
-   CHAT PANEL
-   ============================================================ */
+/* ── Chat ── */
 .chat-panel {
   position: absolute;
   bottom: 14px; right: 14px;
@@ -332,11 +277,7 @@
   from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.chat-msg .msg-name {
-  font-family: var(--font-pixel);
-  font-size: 8px;
-  margin-right: 6px;
-}
+.chat-msg .msg-name { font-family: var(--font-pixel); font-size: 8px; margin-right: 6px; }
 .chat-msg .msg-text { color: var(--c-text); }
 .chat-msg.sys-msg .msg-text { color: var(--c-muted); font-style: italic; }
 
@@ -372,9 +313,6 @@
 .chat-messages::-webkit-scrollbar-track { background: transparent; }
 .chat-messages::-webkit-scrollbar-thumb { background: var(--c-border); border-radius: 2px; }
 
-/* ============================================================
-   RESPONSIVE
-   ============================================================ */
 @media (max-width: 600px) {
   .hud-tr       { font-size: 14px; }
   .hud-tl       { padding: 6px 9px; }
