@@ -3,7 +3,6 @@
    Global reset + Login page styles
    ============================================================ */
 
-/* ── Pixel font variables ── */
 @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323:wght@400&display=swap');
 
 :root {
@@ -23,7 +22,6 @@
   --shadow:     0 0 0 2px var(--c-border), 0 8px 32px rgba(0,0,0,.6);
 }
 
-/* ── Reset ── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { font-size: 16px; }
 body {
@@ -38,9 +36,7 @@ input  { font-family: inherit; }
 a      { color: var(--c-accent); }
 .hidden { display: none !important; }
 
-/* ============================================================
-   LOGIN PAGE
-   ============================================================ */
+/* ── Login page ── */
 .login-page {
   display: flex;
   align-items: center;
@@ -49,7 +45,6 @@ a      { color: var(--c-accent); }
   padding: 24px;
 }
 
-/* ── Animated grid background ── */
 .bg-grid {
   position: fixed; inset: 0; z-index: 0;
   background-image:
@@ -64,7 +59,6 @@ a      { color: var(--c-accent); }
   to   { background-position: 40px 40px; }
 }
 
-/* ── Floating pixel particles ── */
 .floating-pixels {
   position: fixed; inset: 0; z-index: 0; pointer-events: none;
 }
@@ -74,7 +68,6 @@ a      { color: var(--c-accent); }
   background: var(--c-accent);
   opacity: 0;
   animation: floatUp 6s ease-in-out infinite;
-  image-rendering: pixelated;
 }
 .floating-pixels span:nth-child(1)  { left:10%;  animation-delay: 0s;   background: var(--c-accent); }
 .floating-pixels span:nth-child(2)  { left:25%;  animation-delay: 1s;   background: var(--c-accent2); }
@@ -91,7 +84,6 @@ a      { color: var(--c-accent); }
   100% { transform: translateY(-10vh) scale(0.5); opacity: 0; }
 }
 
-/* ── Login container ── */
 .login-container {
   position: relative; z-index: 1;
   display: flex;
@@ -102,7 +94,6 @@ a      { color: var(--c-accent); }
   max-width: 440px;
 }
 
-/* ── Login card ── */
 .login-card {
   width: 100%;
   background: var(--c-surface);
@@ -117,15 +108,9 @@ a      { color: var(--c-accent); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* ── Logo block ── */
-.logo-block {
-  text-align: center;
-  margin-bottom: 28px;
-}
+.logo-block { text-align: center; margin-bottom: 28px; }
 .logo-icon {
-  font-size: 48px;
-  line-height: 1;
-  margin-bottom: 12px;
+  font-size: 48px; line-height: 1; margin-bottom: 12px;
   filter: drop-shadow(0 0 16px var(--c-accent));
   animation: pulse 2s ease-in-out infinite;
 }
@@ -141,14 +126,8 @@ a      { color: var(--c-accent); }
   margin-bottom: 6px;
   letter-spacing: 2px;
 }
-.logo-sub {
-  font-family: var(--font-vt);
-  font-size: 18px;
-  color: var(--c-muted);
-  letter-spacing: 3px;
-}
+.logo-sub { font-size: 18px; color: var(--c-muted); letter-spacing: 3px; }
 
-/* ── Form fields ── */
 .login-form { display: flex; flex-direction: column; gap: 8px; }
 
 .field-label {
@@ -185,13 +164,7 @@ a      { color: var(--c-accent); }
   margin-top: -4px;
 }
 
-/* ── Colour swatches ── */
-.color-row {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin: 4px 0;
-}
+.color-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0; }
 .swatch {
   width: 32px; height: 32px;
   border-radius: 50%;
@@ -207,7 +180,6 @@ a      { color: var(--c-accent); }
   box-shadow: 0 0 0 2px var(--sw), 0 4px 12px rgba(0,0,0,.5);
 }
 
-/* ── Join button ── */
 .join-btn {
   display: flex;
   align-items: center;
@@ -240,7 +212,6 @@ a      { color: var(--c-accent); }
 }
 .btn-arrow { font-size: 14px; }
 
-/* ── Online count ── */
 .online-count {
   display: flex;
   align-items: center;
@@ -251,7 +222,6 @@ a      { color: var(--c-accent); }
   margin-top: 4px;
 }
 
-/* ── How to play card ── */
 .howto-card {
   width: 100%;
   background: var(--c-surface);
@@ -267,19 +237,8 @@ a      { color: var(--c-accent); }
   letter-spacing: 2px;
   margin-bottom: 12px;
 }
-.howto-list {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.howto-list li {
-  font-size: 20px;
-  color: var(--c-text);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
+.howto-list { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.howto-list li { font-size: 20px; color: var(--c-text); display: flex; align-items: center; gap: 8px; }
 kbd {
   display: inline-block;
   background: var(--c-bg);
@@ -291,7 +250,6 @@ kbd {
   color: var(--c-accent);
 }
 
-/* ── Pulsing green dot ── */
 .dot-pulse {
   display: inline-block;
   width: 8px; height: 8px;
@@ -306,7 +264,6 @@ kbd {
   50%      { opacity: .4; box-shadow: 0 0 2px var(--c-accent); }
 }
 
-/* ── Responsive ── */
 @media (max-width: 480px) {
   .login-card { padding: 24px 16px 20px; }
   .logo-title  { font-size: 13px; }
