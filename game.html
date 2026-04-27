@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>WalkWorld — Playing</title>
+  <title>WalkWorld 3D — Playing</title>
   <link rel="stylesheet" href="css/style.css" />
   <link rel="stylesheet" href="css/game.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -32,18 +32,34 @@
     </div>
   </div>
 
+  <!-- ── Pointer-lock click-to-play overlay ── -->
+  <div id="lockOverlay" class="lock-overlay hidden">
+    <div class="lock-box">
+      <p class="lock-icon">🖱️</p>
+      <p class="lock-title">Click to Play</p>
+      <p class="lock-sub">Mouse will be captured · ESC to release</p>
+    </div>
+  </div>
+
   <!-- ── Game wrapper ── -->
   <div id="gameWrapper" class="game-wrapper hidden">
 
-    <!-- Canvas -->
-    <canvas id="gameCanvas" tabindex="0" aria-label="Game world"></canvas>
+    <!-- Three.js renders directly onto this canvas -->
+    <canvas id="gameCanvas" aria-label="3D game world"></canvas>
 
-    <!-- HUD top-left: player info -->
+    <!-- Crosshair -->
+    <div class="crosshair" aria-hidden="true">
+      <div class="ch-h"></div>
+      <div class="ch-v"></div>
+    </div>
+
+    <!-- HUD top-left: player info + zone -->
     <div class="hud hud-tl" id="hudPlayer">
       <div class="hud-avatar" id="hudAvatar"></div>
       <div class="hud-info">
         <span class="hud-name" id="hudName">—</span>
-        <span class="hud-pos"  id="hudPos">x:0 y:0</span>
+        <span class="hud-pos"  id="hudPos">0, 0, 0</span>
+        <span class="hud-zone" id="hudZone">Plains</span>
       </div>
     </div>
 
@@ -53,8 +69,15 @@
       <span id="hudCount">0</span> online
     </div>
 
-    <!-- Mini-map -->
-    <canvas id="minimap" class="minimap" width="120" height="120" aria-label="Minimap"></canvas>
+    <!-- HUD bottom-left: compass + controls -->
+    <div class="hud-bl">
+      <div class="compass" id="compass">
+        <span class="compass-dir" id="compassDir">N</span>
+      </div>
+      <div class="controls-hint" id="controlsHint">
+        WASD · Move &nbsp;|&nbsp; Mouse · Look &nbsp;|&nbsp; Space · Jump &nbsp;|&nbsp; T · Chat
+      </div>
+    </div>
 
     <!-- Chat panel -->
     <div class="chat-panel" id="chatPanel" aria-label="Chat">
@@ -72,19 +95,17 @@
       </form>
     </div>
 
-    <!-- Controls hint (bottom-left) -->
-    <div class="controls-hint" id="controlsHint">
-      WASD · Move &nbsp;|&nbsp; T · Chat &nbsp;|&nbsp; ESC · Close chat
-    </div>
-
   </div><!-- /gameWrapper -->
 
-  <!-- Scripts (module, so order matters) -->
-  <script src="js/firebase-config.js" type="module"></script>
-  <script type="module" src="js/world.js"></script>
-  <script type="module" src="js/renderer.js"></script>
-  <script type="module" src="js/player.js"></script>
+  <!-- Three.js from CDN — must load before game modules -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+  <!-- Game modules -->
+  <script type="module" src="js/firebase-config.js"></script>
   <script type="module" src="js/network.js"></script>
+  <script type="module" src="js/world.js"></script>
+  <script type="module" src="js/objects.js"></script>
+  <script type="module" src="js/player.js"></script>
   <script type="module" src="js/game.js"></script>
 
 </body>
