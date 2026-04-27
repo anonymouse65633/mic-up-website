@@ -1,11 +1,18 @@
 // ============================================================
-//  WalkWorld — game.js
-//  Entry point for the game page.
-//  Orchestrates: init → load → game loop → HUD → chat → cleanup
+//  WalkWorld 3D — game.js   (Part 6)
+//
+//  Orchestrates the full game lifecycle:
+//    init → load world → join Firebase → game loop → cleanup
+//
+//  Three.js r128 is a CDN global (window.THREE).
+//  No renderer.js — we own the WebGLRenderer here.
 // ============================================================
 
-import { Player }        from './player.js';
-import { Renderer }      from './renderer.js';
+import { Player, camera, requestPointerLock, isPointerLocked }
+                          from './player.js';
+import { initWorld, scene, getZoneName }
+                          from './world.js';
+import { initObjects }    from './objects.js';
 import {
   joinGame,
   leaveGame,
@@ -14,118 +21,172 @@ import {
   getPlayerCount,
   sendChat,
   onChat,
-}                        from './network.js';
+}                         from './network.js';
 
-// ── DOM refs ─────────────────────────────────────────────────
-const loadingOverlay     = document.getElementById('loadingOverlay');
-const loadBar            = document.getElementById('loadBar');
-const loadStatus         = document.getElementById('loadStatus');
-const disconnectedOverlay= document.getElementById('disconnectedOverlay');
-const gameWrapper        = document.getElementById('gameWrapper');
-const gameCanvas         = document.getElementById('gameCanvas');
-const minimapCanvas      = document.getElementById('minimap');
+// ── DOM refs ──────────────────────────────────────────────────
+const loadingOverlay      = document.getElementById('loadingOverlay');
+const loadBar             = document.getElementById('loadBar');
+const loadStatus          = document.getElementById('loadStatus');
+const disconnectedOverlay = document.getElementById('disconnectedOverlay');
+const lockOverlay         = document.getElementById('lockOverlay');
+const gameWrapper         = document.getElementById('gameWrapper');
+const gameCanvas          = document.getElementById('gameCanvas');
 
-const hudAvatar          = document.getElementById('hudAvatar');
-const hudName            = document.getElementById('hudName');
-const hudPos             = document.getElementById('hudPos');
-const hudCount           = document.getElementById('hudCount');
+const hudAvatar           = document.getElementById('hudAvatar');
+const hudName             = document.getElementById('hudName');
+const hudPos              = document.getElementById('hudPos');
+const hudZone             = document.getElementById('hudZone');
+const hudCount            = document.getElementById('hudCount');
+const compass             = document.getElementById('compass');
+const compassDir          = document.getElementById('compassDir');
 
-const chatMessages       = document.getElementById('chatMessages');
-const chatForm           = document.getElementById('chatForm');
-const chatInput          = document.getElementById('chatInput');
+const chatMessages        = document.getElementById('chatMessages');
+const chatForm            = document.getElementById('chatForm');
+const chatInput           = document.getElementById('chatInput');
 
 // ── Runtime state ─────────────────────────────────────────────
-let player       = null;
-let renderer     = null;
-let remotePlayers = {};   // { id: { name, colour, x, y } }
-let lastTime     = 0;
-let rafId        = null;
-let isChatOpen   = false;
+let player        = null;
+let renderer3d    = null;
+let remotePlayers = {};
+let remoteMeshes  = {};
+let lastTime      = 0;
+let rafId         = null;
+let isChatOpen    = false;
 
-// Throttle position updates to ~10 Hz (every 100 ms)
 let _lastPosSend = 0;
-const POS_SEND_INTERVAL = 100;
+const POS_INTERVAL = 100;
 
-// ── Boot ──────────────────────────────────────────────────────
+// ── Compass direction labels ──────────────────────────────────
+const DIRS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+
+function _getCompassDir(yaw) {
+  const bearing = ((-yaw) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+  return DIRS[Math.round(bearing / (Math.PI / 4)) % 8];
+}
+
+// ============================================================
+//  REMOTE PLAYER AVATARS
+// ============================================================
+function _createAvatar(colour) {
+  const group = new THREE.Group();
+  const mat = new THREE.MeshLambertMaterial({ color: new THREE.Color(colour) });
+
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 1.4, 8), mat);
+  body.position.y = 0.7;
+  group.add(body);
+
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.32, 8, 8), mat);
+  head.position.y = 1.72;
+  group.add(head);
+
+  const outlineMat = new THREE.MeshLambertMaterial({ color: 0x000000, side: THREE.BackSide });
+  const outline = new THREE.Mesh(new THREE.SphereGeometry(0.35, 8, 8), outlineMat);
+  outline.position.y = 1.72;
+  group.add(outline);
+
+  return group;
+}
+
+function _syncRemotePlayers(players) {
+  for (const [id, data] of Object.entries(players)) {
+    if (!remoteMeshes[id]) {
+      const grp = _createAvatar(data.colour);
+      scene.add(grp);
+      remoteMeshes[id] = grp;
+    }
+    const grp = remoteMeshes[id];
+    grp.position.set(data.x, data.y, data.z);
+    grp.rotation.y = data.rotationY;
+  }
+
+  for (const id of Object.keys(remoteMeshes)) {
+    if (!players[id]) {
+      scene.remove(remoteMeshes[id]);
+      delete remoteMeshes[id];
+    }
+  }
+}
+
+// ============================================================
+//  BOOT
+// ============================================================
 async function init() {
-  // 1. Read player identity from sessionStorage (set on login page)
   const name   = sessionStorage.getItem('playerName');
   const colour = sessionStorage.getItem('playerColour');
 
-  if (!name) {
-    // Redirect back to lobby if they landed here directly
-    window.location.href = 'index.html';
-    return;
-  }
+  if (!name) { window.location.href = 'index.html'; return; }
 
-  // 2. Show load progress
-  setLoad(10, 'Building world…');
-  await tick(); // yield so browser paints
+  setLoad(5, 'Building world…');
+  await tick();
+  initWorld();
 
-  // 3. Create player + renderer (world is already built by world.js import)
-  player   = new Player(name, colour);
-  renderer = new Renderer(gameCanvas, minimapCanvas);
+  setLoad(25, 'Placing objects…');
+  await tick();
+  initObjects();
 
-  setLoad(30, 'Spawning player…');
+  setLoad(40, 'Starting renderer…');
   await tick();
 
-  // 4. Set up HUD avatar + name
+  renderer3d = new THREE.WebGLRenderer({ canvas: gameCanvas, antialias: true });
+  renderer3d.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer3d.setSize(window.innerWidth, window.innerHeight);
+  renderer3d.outputEncoding = THREE.sRGBEncoding;
+
+  window.addEventListener('resize', () => {
+    renderer3d.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  setLoad(50, 'Spawning player…');
+  await tick();
+
+  player = new Player(name, colour);
   hudAvatar.style.background = colour;
   hudName.textContent        = name;
 
-  setLoad(50, 'Connecting to server…');
+  setLoad(60, 'Connecting to server…');
   await tick();
 
-  // 5. Join Firebase multiplayer
   let playerId = null;
   try {
-    playerId = await joinGame({ name, colour, x: player.x, y: player.y });
+    playerId = await joinGame({
+      name, colour,
+      x: player.x, y: player.y, z: player.z, rotationY: player.rotationY,
+    });
   } catch (err) {
     console.error('[Game] joinGame failed:', err);
     showDisconnected();
     return;
   }
 
-  setLoad(70, 'Syncing players…');
+  setLoad(72, 'Syncing players…');
   await tick();
 
-  // 6. Subscribe to remote players
   onPlayersUpdate(players => {
     remotePlayers = players;
-    hudCount.textContent = Object.keys(players).length + 1; // +1 = self
+    _syncRemotePlayers(players);
   });
 
-  // 7. Subscribe to live player count (also counts self)
   getPlayerCount(n => { hudCount.textContent = n; });
 
   setLoad(85, 'Loading chat…');
   await tick();
 
-  // 8. Subscribe to chat
-  onChat(messages => renderChat(messages));
-
-  // 9. Wire up chat UI
-  setupChat(name, colour);
+  onChat(messages => _renderChat(messages));
+  _setupChat(name, colour);
+  _setupPointerLock();
 
   setLoad(100, 'Ready!');
-  await delay(300);
+  await delay(280);
 
-  // 10. Show game, hide loader
   loadingOverlay.classList.add('hidden');
   gameWrapper.classList.remove('hidden');
-  gameCanvas.focus();
+  lockOverlay.classList.remove('hidden');
 
-  // 11. Start game loop
   lastTime = performance.now();
   rafId    = requestAnimationFrame(gameLoop);
 
-  // 12. Cleanup on page leave
-  window.addEventListener('beforeunload', () => {
-    leaveGame(name);
-    if (rafId) cancelAnimationFrame(rafId);
-  });
+  window.addEventListener('beforeunload', _cleanup);
 
-  // Also handle mobile back / tab switch
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
       if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
@@ -136,72 +197,86 @@ async function init() {
   });
 }
 
-// ── Game Loop ─────────────────────────────────────────────────
+// ============================================================
+//  POINTER LOCK
+// ============================================================
+function _setupPointerLock() {
+  lockOverlay.addEventListener('click', () => requestPointerLock(gameCanvas));
+
+  gameCanvas.addEventListener('click', () => {
+    if (!isPointerLocked() && !isChatOpen) requestPointerLock(gameCanvas);
+  });
+
+  document.addEventListener('pointerlockchange', () => {
+    if (isPointerLocked()) {
+      lockOverlay.classList.add('hidden');
+    } else {
+      if (!isChatOpen) lockOverlay.classList.remove('hidden');
+    }
+  });
+}
+
+// ============================================================
+//  GAME LOOP
+// ============================================================
 function gameLoop(timestamp) {
-  const dt = Math.min((timestamp - lastTime) / 1000, 0.1); // cap at 100ms
+  const dt = Math.min((timestamp - lastTime) / 1000, 0.1);
   lastTime = timestamp;
 
-  // Move local player
   player.update(dt);
 
-  // Send position to Firebase (throttled)
-  if (timestamp - _lastPosSend > POS_SEND_INTERVAL) {
-    updatePosition(player.x, player.y);
+  if (timestamp - _lastPosSend > POS_INTERVAL) {
+    updatePosition(player.x, player.y, player.z, player.rotationY);
     _lastPosSend = timestamp;
   }
 
-  // Update HUD position
-  const tx = Math.floor(player.x / 32);
-  const ty = Math.floor(player.y / 32);
-  hudPos.textContent = `x:${tx} y:${ty}`;
+  hudPos.textContent  = `${player.x.toFixed(1)}, ${player.y.toFixed(1)}, ${player.z.toFixed(1)}`;
+  hudZone.textContent = getZoneName(player.x, player.z);
 
-  // Draw everything
-  renderer.draw(player, remotePlayers, timestamp);
+  compass.style.transform    = `rotate(${player.yaw}rad)`;
+  compassDir.textContent     = _getCompassDir(player.yaw);
+  compassDir.style.transform = `rotate(${-player.yaw}rad)`;
+
+  renderer3d.render(scene, camera);
 
   rafId = requestAnimationFrame(gameLoop);
 }
 
-// ── Chat ──────────────────────────────────────────────────────
-function setupChat(name, colour) {
-  // T → open chat
+// ============================================================
+//  CHAT
+// ============================================================
+function _setupChat(name, colour) {
   document.addEventListener('keydown', e => {
-    if (e.code === 'KeyT' && !isChatOpen) {
-      e.preventDefault();
-      openChat();
-    }
-    if (e.code === 'Escape' && isChatOpen) {
-      closeChat();
-    }
+    if (e.code === 'KeyT' && !isChatOpen) { e.preventDefault(); _openChat(); }
+    if (e.code === 'Escape' && isChatOpen) { e.preventDefault(); _closeChat(); }
   });
 
-  // Submit chat form
   chatForm.addEventListener('submit', e => {
     e.preventDefault();
     const text = chatInput.value.trim();
-    if (!text) return;
+    if (!text) { _closeChat(); return; }
     sendChat({ name, colour, text });
-    // Show local bubble immediately (before Firebase round-trip)
-    renderer.addBubble('local', text);
     chatInput.value = '';
-    closeChat();
+    _closeChat();
   });
 }
 
-function openChat() {
+function _openChat() {
   isChatOpen = true;
+  if (isPointerLocked()) document.exitPointerLock();
   chatInput.disabled = false;
   chatInput.focus();
+  lockOverlay.classList.add('hidden');
 }
 
-function closeChat() {
+function _closeChat() {
   isChatOpen = false;
   chatInput.disabled = true;
   chatInput.blur();
-  gameCanvas.focus();
+  lockOverlay.classList.remove('hidden');
 }
 
-// Render chat message list from Firebase snapshot
-function renderChat(messages) {
+function _renderChat(messages) {
   chatMessages.innerHTML = '';
   messages.forEach(m => {
     const div = document.createElement('div');
@@ -211,33 +286,23 @@ function renderChat(messages) {
       const nameSpan = document.createElement('span');
       nameSpan.className   = 'msg-name';
       nameSpan.style.color = m.colour || '#ffffff';
-      nameSpan.textContent = m.name;
+      nameSpan.textContent = m.name + ':';
       div.appendChild(nameSpan);
     }
 
     const textSpan = document.createElement('span');
     textSpan.className   = 'msg-text';
-    textSpan.textContent = m.text;
+    textSpan.textContent = ' ' + m.text;
     div.appendChild(textSpan);
-
-    // For live chat bubbles: remote players
-    if (!m.system && m.name) {
-      // Find the matching remote player by name and add bubble
-      for (const [id, p] of Object.entries(remotePlayers)) {
-        if (p.name === m.name) {
-          renderer.addBubble(id, m.text);
-          break;
-        }
-      }
-    }
 
     chatMessages.appendChild(div);
   });
-  // Auto-scroll to bottom
   chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
-// ── Loading helpers ───────────────────────────────────────────
+// ============================================================
+//  HELPERS
+// ============================================================
 function setLoad(pct, msg) {
   loadBar.style.width    = pct + '%';
   loadStatus.textContent = msg;
@@ -248,9 +313,13 @@ function showDisconnected() {
   disconnectedOverlay.classList.remove('hidden');
 }
 
-// ── Tiny helpers ──────────────────────────────────────────────
+function _cleanup() {
+  if (player) leaveGame(player.name);
+  if (rafId)  cancelAnimationFrame(rafId);
+}
+
 const tick  = () => new Promise(r => requestAnimationFrame(r));
-const delay = ms => new Promise(r => setTimeout(r, ms));
+const delay = ms  => new Promise(r => setTimeout(r, ms));
 
 // ── Start ─────────────────────────────────────────────────────
 init().catch(err => {
