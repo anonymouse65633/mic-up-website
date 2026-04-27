@@ -1,44 +1,23 @@
 // ============================================================
 //  WalkWorld 3D — network.js
-//  Handles all Firebase Realtime Database multiplayer logic.
-//
-//  Changes from 2D version:
-//    • joinGame / updatePosition now sync x, y, z, rotationY
-//    • onPlayersUpdate passes all 4 values to the game loop
-//    • Everything else (chat, count, cleanup) is identical
 // ============================================================
 
 import { db, isConfigured } from './firebase-config.js';
 import {
-  ref,
-  set,
-  push,
-  remove,
-  update,
-  onValue,
-  onDisconnect,
-  serverTimestamp,
-  query,
-  limitToLast,
-  off,
+  ref, set, push, remove, update, onValue,
+  onDisconnect, serverTimestamp, query, limitToLast, off,
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
-// ── Internal state ──────────────────────────────────────────
 let _playerId      = null;
 let _playerRef     = null;
 let _unsubscribers = [];
 
-// ── Firebase DB paths ───────────────────────────────────────
 const PATHS = {
-  players : () => ref(db, 'players'),
-  player  : (id) => ref(db, `players/${id}`),
-  chat    : () => ref(db, 'chat'),
+  players: ()   => ref(db, 'players'),
+  player:  (id) => ref(db, `players/${id}`),
+  chat:    ()   => ref(db, 'chat'),
 };
 
-// ============================================================
-//  JOIN
-//  playerData: { name, colour, x, y, z, rotationY }
-// ============================================================
 export async function joinGame(playerData) {
   if (!isConfigured) {
     console.warn('[Network] Firebase not configured — offline mode.');
@@ -51,9 +30,9 @@ export async function joinGame(playerData) {
   await set(_playerRef, {
     name:      playerData.name,
     colour:    playerData.colour,
-    x:         playerData.x      ?? 0,
-    y:         playerData.y      ?? 0,
-    z:         playerData.z      ?? 0,
+    x:         playerData.x         ?? 0,
+    y:         playerData.y         ?? 0,
+    z:         playerData.z         ?? 0,
     rotationY: playerData.rotationY ?? 0,
     joinedAt:  serverTimestamp(),
   });
@@ -64,54 +43,34 @@ export async function joinGame(playerData) {
   return _playerId;
 }
 
-// ============================================================
-//  LEAVE
-// ============================================================
 export async function leaveGame(playerName) {
   if (!_playerRef) return;
-
   onDisconnect(_playerRef).cancel();
   _pushSystemChat(`${playerName} left the world`);
   await remove(_playerRef);
-
   _unsubscribers.forEach(fn => fn());
   _unsubscribers = [];
   _playerRef = null;
   _playerId  = null;
 }
 
-// ============================================================
-//  UPDATE POSITION — called every frame (throttled by game.js)
-//  x, z  = horizontal position in 3D world
-//  y     = vertical position (height)
-//  rotationY = camera/player yaw in radians (for facing direction)
-// ============================================================
 export function updatePosition(x, y, z, rotationY) {
   if (!_playerRef || !isConfigured) return;
   update(_playerRef, {
-    x:         Math.round(x * 10) / 10,   // 1 decimal place — smooth but compact
+    x:         Math.round(x * 10) / 10,
     y:         Math.round(y * 10) / 10,
     z:         Math.round(z * 10) / 10,
     rotationY: Math.round(rotationY * 100) / 100,
   });
 }
 
-// ============================================================
-//  SUBSCRIBE TO PLAYERS
-//  callback receives: { id: { name, colour, x, y, z, rotationY } }
-// ============================================================
 export function onPlayersUpdate(callback) {
-  if (!isConfigured) {
-    callback({});
-    return () => {};
-  }
+  if (!isConfigured) { callback({}); return () => {}; }
 
   const playersRef = PATHS.players();
-
   const unsub = onValue(playersRef, snapshot => {
     const raw    = snapshot.val() || {};
     const others = {};
-
     for (const [id, data] of Object.entries(raw)) {
       if (id === _playerId) continue;
       others[id] = {
@@ -123,7 +82,6 @@ export function onPlayersUpdate(callback) {
         rotationY: data.rotationY ?? 0,
       };
     }
-
     callback(others);
   });
 
@@ -132,17 +90,10 @@ export function onPlayersUpdate(callback) {
   return unsubFn;
 }
 
-// ============================================================
-//  PLAYER COUNT
-// ============================================================
 export function getPlayerCount(callback) {
-  if (!isConfigured) {
-    callback(0);
-    return () => {};
-  }
+  if (!isConfigured) { callback(0); return () => {}; }
 
   const playersRef = PATHS.players();
-
   const unsub = onValue(playersRef, snapshot => {
     callback(snapshot.exists() ? Object.keys(snapshot.val()).length : 0);
   });
@@ -152,12 +103,8 @@ export function getPlayerCount(callback) {
   return unsubFn;
 }
 
-// ============================================================
-//  SEND CHAT
-// ============================================================
 export function sendChat(msg) {
   if (!isConfigured || !msg.text?.trim()) return;
-
   const newMsg = push(PATHS.chat());
   set(newMsg, {
     name:   msg.name,
@@ -169,17 +116,10 @@ export function sendChat(msg) {
   _pruneChat(40);
 }
 
-// ============================================================
-//  SUBSCRIBE TO CHAT
-// ============================================================
 export function onChat(callback) {
-  if (!isConfigured) {
-    callback([]);
-    return () => {};
-  }
+  if (!isConfigured) { callback([]); return () => {}; }
 
   const chatQuery = query(PATHS.chat(), limitToLast(40));
-
   const unsub = onValue(chatQuery, snapshot => {
     const raw  = snapshot.val() || {};
     const msgs = Object.values(raw).map(m => ({
@@ -196,16 +136,10 @@ export function onChat(callback) {
   return unsubFn;
 }
 
-// ============================================================
-//  INTERNAL HELPERS
-// ============================================================
 function _pushSystemChat(text) {
   if (!isConfigured) return;
   const newMsg = push(PATHS.chat());
-  set(newMsg, {
-    name: '', colour: '#6868a8', text,
-    time: serverTimestamp(), system: true,
-  });
+  set(newMsg, { name: '', colour: '#6868a8', text, time: serverTimestamp(), system: true });
   _pruneChat(40);
 }
 
@@ -215,8 +149,7 @@ async function _pruneChat(keep) {
     if (!snapshot.exists()) return;
     const keys = Object.keys(snapshot.val());
     if (keys.length > keep) {
-      keys.slice(0, keys.length - keep)
-          .forEach(k => remove(ref(db, `chat/${k}`)));
+      keys.slice(0, keys.length - keep).forEach(k => remove(ref(db, `chat/${k}`)));
     }
   }, { onlyOnce: true });
 }
