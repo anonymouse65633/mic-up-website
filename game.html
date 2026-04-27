@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WalkWorld — Playing</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/game.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323:wght@400&display=swap" rel="stylesheet" />
+</head>
+<body class="game-page">
+
+  <!-- ── Loading overlay ── -->
+  <div id="loadingOverlay" class="overlay loading-overlay" aria-live="polite">
+    <div class="loading-box">
+      <div class="load-icon">🌍</div>
+      <p class="load-title">Loading World…</p>
+      <div class="load-bar-wrap"><div class="load-bar" id="loadBar"></div></div>
+      <p class="load-status" id="loadStatus">Connecting…</p>
+    </div>
+  </div>
+
+  <!-- ── Disconnected overlay ── -->
+  <div id="disconnectedOverlay" class="overlay disc-overlay hidden">
+    <div class="disc-box">
+      <p class="disc-icon">⚠️</p>
+      <p class="disc-title">Disconnected</p>
+      <p class="disc-msg">Lost connection to server.</p>
+      <button class="disc-btn" onclick="window.location.reload()">RECONNECT</button>
+      <a class="disc-back" href="index.html">← Back to lobby</a>
+    </div>
+  </div>
+
+  <!-- ── Game wrapper ── -->
+  <div id="gameWrapper" class="game-wrapper hidden">
+
+    <!-- Canvas -->
+    <canvas id="gameCanvas" tabindex="0" aria-label="Game world"></canvas>
+
+    <!-- HUD top-left: player info -->
+    <div class="hud hud-tl" id="hudPlayer">
+      <div class="hud-avatar" id="hudAvatar"></div>
+      <div class="hud-info">
+        <span class="hud-name" id="hudName">—</span>
+        <span class="hud-pos"  id="hudPos">x:0 y:0</span>
+      </div>
+    </div>
+
+    <!-- HUD top-right: online count -->
+    <div class="hud hud-tr" id="hudOnline">
+      <span class="dot-pulse"></span>
+      <span id="hudCount">0</span> online
+    </div>
+
+    <!-- Mini-map -->
+    <canvas id="minimap" class="minimap" width="120" height="120" aria-label="Minimap"></canvas>
+
+    <!-- Chat panel -->
+    <div class="chat-panel" id="chatPanel" aria-label="Chat">
+      <div class="chat-messages" id="chatMessages"></div>
+      <form class="chat-form" id="chatForm" autocomplete="off">
+        <input
+          id="chatInput"
+          class="chat-input"
+          type="text"
+          maxlength="80"
+          placeholder="Press T to chat…"
+          disabled
+        />
+        <button class="chat-send" type="submit" aria-label="Send">▶</button>
+      </form>
+    </div>
+
+    <!-- Controls hint (bottom-left) -->
+    <div class="controls-hint" id="controlsHint">
+      WASD · Move &nbsp;|&nbsp; T · Chat &nbsp;|&nbsp; ESC · Close chat
+    </div>
+
+  </div><!-- /gameWrapper -->
+
+  <!-- Scripts (module, so order matters) -->
+  <script src="js/firebase-config.js" type="module"></script>
+  <script type="module" src="js/world.js"></script>
+  <script type="module" src="js/renderer.js"></script>
+  <script type="module" src="js/player.js"></script>
+  <script type="module" src="js/network.js"></script>
+  <script type="module" src="js/game.js"></script>
+
+</body>
+</html>

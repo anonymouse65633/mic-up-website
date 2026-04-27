@@ -1,0 +1,325 @@
+/* ============================================================
+   WalkWorld — game.css
+   In-game UI: canvas, HUD, overlays, chat, minimap
+   ============================================================ */
+
+/* ── Game page body ── */
+.game-page {
+  overflow: hidden;
+  width: 100vw;
+  height: 100dvh;
+}
+
+/* ── Game wrapper ── */
+.game-wrapper {
+  position: relative;
+  width: 100vw;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+/* ── Canvas ── */
+#gameCanvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  cursor: crosshair;
+  outline: none;
+}
+
+/* ============================================================
+   OVERLAYS
+   ============================================================ */
+.overlay {
+  position: fixed; inset: 0; z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(13, 13, 26, .92);
+  backdrop-filter: blur(4px);
+}
+
+/* ── Loading overlay ── */
+.loading-box {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+.load-icon {
+  font-size: 56px;
+  animation: spinBob 2s ease-in-out infinite;
+}
+@keyframes spinBob {
+  0%,100% { transform: translateY(0) rotate(0deg); }
+  50%      { transform: translateY(-8px) rotate(5deg); }
+}
+.load-title {
+  font-family: var(--font-pixel);
+  font-size: 13px;
+  color: var(--c-accent);
+  text-shadow: 0 0 16px var(--c-accent);
+  letter-spacing: 2px;
+}
+.load-bar-wrap {
+  width: 200px; height: 8px;
+  background: var(--c-border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.load-bar {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--c-accent), var(--c-accent2));
+  border-radius: 4px;
+  transition: width .3s ease;
+  box-shadow: 0 0 8px var(--c-accent);
+}
+.load-status {
+  font-size: 18px;
+  color: var(--c-muted);
+  letter-spacing: 2px;
+}
+
+/* ── Disconnected overlay ── */
+.disc-overlay {
+  background: rgba(13,13,26,.97);
+}
+.disc-box {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 36px;
+  background: var(--c-surface);
+  border: 2px solid var(--c-danger);
+  border-radius: var(--radius);
+  box-shadow: 0 0 40px rgba(255,71,87,.3);
+}
+.disc-icon  { font-size: 48px; }
+.disc-title {
+  font-family: var(--font-pixel);
+  font-size: 14px;
+  color: var(--c-danger);
+}
+.disc-msg {
+  font-size: 20px;
+  color: var(--c-muted);
+}
+.disc-btn {
+  margin-top: 8px;
+  padding: 10px 24px;
+  background: var(--c-danger);
+  color: #fff;
+  font-family: var(--font-pixel);
+  font-size: 10px;
+  border-radius: var(--radius);
+  letter-spacing: 1px;
+  transition: opacity .2s;
+}
+.disc-btn:hover { opacity: .85; }
+.disc-back {
+  font-size: 16px;
+  color: var(--c-muted);
+  text-decoration: none;
+}
+.disc-back:hover { color: var(--c-text); }
+
+/* ============================================================
+   HUD
+   ============================================================ */
+.hud {
+  position: absolute;
+  z-index: 10;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* ── Top-left: player avatar + name ── */
+.hud-tl {
+  top: 14px; left: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(13,13,26,.75);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  backdrop-filter: blur(6px);
+}
+.hud-avatar {
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  flex-shrink: 0;
+}
+.hud-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.hud-name {
+  font-family: var(--font-pixel);
+  font-size: 9px;
+  color: var(--c-text);
+  letter-spacing: 1px;
+}
+.hud-pos {
+  font-size: 14px;
+  color: var(--c-muted);
+  letter-spacing: 1px;
+}
+
+/* ── Top-right: online count ── */
+.hud-tr {
+  top: 14px; right: 14px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: rgba(13,13,26,.75);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  backdrop-filter: blur(6px);
+  font-size: 18px;
+  color: var(--c-text);
+}
+
+/* ── Minimap (bottom-right) ── */
+.minimap {
+  position: absolute;
+  bottom: 60px; right: 14px;
+  z-index: 10;
+  border: 2px solid var(--c-border);
+  border-radius: var(--radius);
+  background: rgba(13,13,26,.8);
+  image-rendering: pixelated;
+  box-shadow: 0 0 12px rgba(0,0,0,.5);
+}
+
+/* ── Controls hint (bottom-left) ── */
+.controls-hint {
+  position: absolute;
+  bottom: 14px; left: 14px;
+  z-index: 10;
+  font-size: 14px;
+  color: var(--c-muted);
+  letter-spacing: 1px;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* ============================================================
+   CHAT PANEL
+   ============================================================ */
+.chat-panel {
+  position: absolute;
+  bottom: 14px; right: 14px;
+  z-index: 20;
+  width: clamp(240px, 30vw, 340px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Slide minimap up if minimap visible */
+.minimap ~ .chat-panel { bottom: 152px; }
+
+.chat-messages {
+  max-height: 180px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  background: rgba(13,13,26,.78);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  backdrop-filter: blur(6px);
+  scroll-behavior: smooth;
+}
+.chat-messages:empty { display: none; }
+
+/* Individual chat message */
+.chat-msg {
+  font-size: 17px;
+  line-height: 1.35;
+  word-break: break-word;
+  animation: msgIn .2s ease both;
+}
+@keyframes msgIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.chat-msg .msg-name {
+  font-family: var(--font-pixel);
+  font-size: 8px;
+  margin-right: 6px;
+}
+.chat-msg .msg-text {
+  color: var(--c-text);
+}
+.chat-msg.sys-msg .msg-text {
+  color: var(--c-muted);
+  font-style: italic;
+}
+
+/* ── Chat form ── */
+.chat-form {
+  display: flex;
+  gap: 6px;
+}
+.chat-input {
+  flex: 1;
+  background: rgba(13,13,26,.85);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  color: var(--c-text);
+  font-size: 17px;
+  padding: 8px 10px;
+  outline: none;
+  transition: border-color .2s;
+}
+.chat-input:focus   { border-color: var(--c-accent); }
+.chat-input:disabled { opacity: 0; pointer-events: none; }
+.chat-input::placeholder { color: var(--c-muted); }
+
+.chat-send {
+  background: var(--c-accent);
+  color: #0d0d1a;
+  border-radius: var(--radius);
+  width: 36px;
+  font-size: 13px;
+  display: none; /* hidden on desktop; shown on mobile */
+  align-items: center;
+  justify-content: center;
+  transition: opacity .2s;
+}
+.chat-send:hover { opacity: .85; }
+
+@media (pointer: coarse) {
+  .chat-send { display: flex; }
+}
+
+/* ── Scrollbar styling ── */
+.chat-messages::-webkit-scrollbar { width: 4px; }
+.chat-messages::-webkit-scrollbar-track { background: transparent; }
+.chat-messages::-webkit-scrollbar-thumb {
+  background: var(--c-border);
+  border-radius: 2px;
+}
+
+/* ============================================================
+   RESPONSIVE ADJUSTMENTS
+   ============================================================ */
+@media (max-width: 600px) {
+  .hud-tr    { font-size: 14px; }
+  .hud-tl    { padding: 6px 9px; }
+  .minimap   { width: 80px; height: 80px; bottom: 50px; right: 10px; }
+  .chat-panel { width: calc(100vw - 20px); right: 10px; bottom: 10px; }
+  .controls-hint { display: none; }
+}

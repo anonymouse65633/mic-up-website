@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WalkWorld — Multiplayer</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323:wght@400&display=swap" rel="stylesheet" />
+</head>
+<body class="login-page">
+
+  <!-- Animated pixel background -->
+  <div class="bg-grid"></div>
+  <div class="floating-pixels" aria-hidden="true">
+    <span></span><span></span><span></span><span></span>
+    <span></span><span></span><span></span><span></span>
+  </div>
+
+  <!-- Login card -->
+  <main class="login-container">
+    <div class="login-card">
+
+      <div class="logo-block">
+        <div class="logo-icon">🌍</div>
+        <h1 class="logo-title">WalkWorld</h1>
+        <p class="logo-sub">Multiplayer · Free · Open</p>
+      </div>
+
+      <div class="login-form">
+        <label class="field-label" for="playerName">YOUR NAME</label>
+        <input
+          id="playerName"
+          class="name-input"
+          type="text"
+          maxlength="16"
+          placeholder="Enter name..."
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <div class="char-count"><span id="charCount">0</span>/16</div>
+
+        <label class="field-label" for="colorPicker">PICK COLOUR</label>
+        <div class="color-row" id="colorPicker" role="group" aria-label="Pick a player colour">
+          <!-- Colour swatches injected by style.css data attrs, handled in JS -->
+        </div>
+
+        <button class="join-btn" id="joinBtn" disabled>
+          <span class="btn-text">ENTER WORLD</span>
+          <span class="btn-arrow">▶</span>
+        </button>
+
+        <p class="online-count">
+          <span class="dot-pulse"></span>
+          <span id="onlineCount">—</span> players online
+        </p>
+      </div>
+
+    </div>
+
+    <!-- How to play -->
+    <div class="howto-card">
+      <h2 class="howto-title">HOW TO PLAY</h2>
+      <ul class="howto-list">
+        <li><kbd>W A S D</kbd> or <kbd>↑ ← ↓ →</kbd> to move</li>
+        <li><kbd>T</kbd> to open chat</li>
+        <li><kbd>ESC</kbd> to close chat</li>
+      </ul>
+    </div>
+  </main>
+
+  <script src="js/firebase-config.js" type="module"></script>
+  <script type="module">
+    import { getPlayerCount } from './js/network.js';
+
+    const nameInput  = document.getElementById('playerName');
+    const charCount  = document.getElementById('charCount');
+    const joinBtn    = document.getElementById('joinBtn');
+    const countEl    = document.getElementById('onlineCount');
+
+    // --- colour swatches ---
+    const COLOURS = ['#ff4757','#ffa502','#eccc68','#2ed573','#1e90ff','#a29bfe','#fd79a8','#ffffff'];
+    let selectedColour = COLOURS[Math.floor(Math.random() * COLOURS.length)];
+    const picker = document.getElementById('colorPicker');
+
+    COLOURS.forEach(c => {
+      const btn = document.createElement('button');
+      btn.className = 'swatch' + (c === selectedColour ? ' active' : '');
+      btn.style.setProperty('--sw', c);
+      btn.setAttribute('aria-label', c);
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.swatch').forEach(s => s.classList.remove('active'));
+        btn.classList.add('active');
+        selectedColour = c;
+      });
+      picker.appendChild(btn);
+    });
+
+    // --- name input ---
+    nameInput.addEventListener('input', () => {
+      const len = nameInput.value.trim().length;
+      charCount.textContent = nameInput.value.length;
+      joinBtn.disabled = len < 1;
+    });
+
+    // Enter key joins
+    nameInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !joinBtn.disabled) joinBtn.click();
+    });
+
+    // --- join ---
+    joinBtn.addEventListener('click', () => {
+      const name = nameInput.value.trim();
+      if (!name) return;
+      sessionStorage.setItem('playerName',   name);
+      sessionStorage.setItem('playerColour', selectedColour);
+      window.location.href = 'game.html';
+    });
+
+    // --- live player count (optional, graceful if network.js not ready) ---
+    try {
+      getPlayerCount(n => { countEl.textContent = n; });
+    } catch (_) {
+      countEl.textContent = '?';
+    }
+  </script>
+</body>
+</html>
