@@ -260,3 +260,111 @@ function buildFence() {
     if (ip >= MAX_P) return;
     const g = getHeightAt(x, z);
     setMatrix(meshPost, ip, x, g + 0.70, z, 0, 1, 1, 1);
+    setMatrix(meshRail, ip, x + Math.cos(ry) * 1.75, g + 0.80, z + Math.sin(ry) * 1.75, ry + Math.PI * 0.5, 1, 1, 1);
+    ip++;
+  }
+
+  for (let x = FCX - FW*0.5; x <= FCX + FW*0.5; x += PS) fencePost(x, FCZ + FH*0.5, 0);
+  for (let x = FCX - FW*0.5; x <= FCX + FW*0.5; x += PS) fencePost(x, FCZ - FH*0.5, 0);
+  for (let z = FCZ - FH*0.5; z <= FCZ + FH*0.5; z += PS) fencePost(FCX + FW*0.5, z, Math.PI*0.5);
+  for (let z = FCZ - FH*0.5; z <= FCZ + FH*0.5; z += PS) fencePost(FCX - FW*0.5, z, Math.PI*0.5);
+
+  meshPost.count = meshRail.count = ip;
+  meshPost.instanceMatrix.needsUpdate = meshRail.instanceMatrix.needsUpdate = true;
+  scene.add(meshPost, meshRail);
+}
+
+function buildSigns() {
+  const signs = [
+    [-22, 10, 'Forest', Math.PI * 0.75],
+    [ 38, 18, 'Lake',   Math.PI * 1.5 ],
+    [ 32,-28, 'Cabin',  0             ],
+    [  0,-16, 'Plaza',  Math.PI       ],
+  ];
+  signs.forEach(([sx, sz,, ry]) => {
+    const ground = getHeightAt(sx, sz);
+    const post = new THREE.Mesh(GEO.box, MAT.signPost);
+    post.scale.set(0.16, 2.2, 0.16);
+    post.position.set(sx, ground + 1.1, sz);
+    scene.add(post);
+    const board = new THREE.Mesh(GEO.box, MAT.signBoard);
+    board.scale.set(1.6, 0.65, 0.12);
+    board.position.set(sx, ground + 2.2, sz);
+    board.rotation.y = ry;
+    scene.add(board);
+  });
+}
+
+function buildReeds() {
+  const MAX_R  = 90;
+  const meshR  = new THREE.InstancedMesh(
+    new THREE.CylinderGeometry(0.05, 0.08, 1.8, 4),
+    new THREE.MeshLambertMaterial({ color: 0x5a7a30 }),
+    MAX_R
+  );
+  let ir = 0;
+  const rng = makeRng(0xAEED0550);
+  for (let i = 0; i < 300 && ir < MAX_R; i++) {
+    const a = rng() * Math.PI * 2;
+    const r = 17 + rng() * 6;
+    const x = 60 + Math.cos(a) * r;
+    const z = 50 + Math.sin(a) * r;
+    if (Math.abs(x) >= HALF-2 || Math.abs(z) >= HALF-2) continue;
+    if (getZoneName(x, z) === 'Lake' || isBlocked(x, z)) continue;
+    const sc = 0.6 + rng() * 0.8;
+    setMatrix(meshR, ir++, x, getHeightAt(x, z) + 0.9*sc, z, rng()*Math.PI*2, sc, sc, sc);
+  }
+  meshR.count = ir; meshR.instanceMatrix.needsUpdate = true;
+  scene.add(meshR);
+}
+
+function buildPlaza() {
+  const wallMat = new THREE.MeshLambertMaterial({ color: 0x8888a0 });
+  function addWall(x, z, sx, sz) {
+    const m = new THREE.Mesh(GEO.box, wallMat);
+    m.scale.set(sx, 0.60, sz);
+    m.position.set(x, getHeightAt(x, z) + 0.30, z);
+    scene.add(m);
+  }
+  addWall( 0,-18, 44, 0.5); addWall( 0, 18, 44, 0.5);
+  addWall(-22, 0, 0.5, 36); addWall(22,  0, 0.5, 36);
+
+  const fMat  = new THREE.MeshLambertMaterial({ color: 0x9090b0 });
+  const wMat2 = new THREE.MeshLambertMaterial({ color: 0x40a0e0, transparent: true, opacity: 0.75 });
+  const baseY = getHeightAt(0, 0);
+
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.6, 0.70, 12), fMat);
+  base.position.set(0, baseY + 0.35, 0); scene.add(base);
+  const pool = new THREE.Mesh(new THREE.CylinderGeometry(2.0, 2.0, 0.20, 12), wMat2);
+  pool.position.set(0, baseY + 0.68, 0); scene.add(pool);
+  const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 2.0, 8), fMat);
+  pillar.position.set(0, baseY + 1.8, 0); scene.add(pillar);
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.22, 0.30, 8), fMat);
+  cap.position.set(0, baseY + 2.95, 0); scene.add(cap);
+}
+
+function buildBoulders() {
+  const rng = makeRng(0xB0DEED00);
+  const mat = new THREE.MeshLambertMaterial({ color: 0x60606a });
+  [[-65,-5],[-48,12],[10,45],[-30,55],[72,-25]].forEach(([bx, bz]) => {
+    const geo  = new THREE.IcosahedronGeometry(1.8 + rng() * 1.4, 1);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.scale.set(1 + rng()*0.4, 0.7 + rng()*0.5, 1 + rng()*0.4);
+    mesh.position.set(bx, getHeightAt(bx, bz) + 0.8, bz);
+    mesh.rotation.y = rng() * Math.PI * 2;
+    scene.add(mesh);
+  });
+}
+
+export function initObjects() {
+  buildTrees();
+  buildRocks();
+  buildFlowers();
+  buildMushrooms();
+  buildCabin();
+  buildFence();
+  buildSigns();
+  buildReeds();
+  buildPlaza();
+  buildBoulders();
+}
