@@ -1,10 +1,11 @@
 // ============================================================
-//  WalkWorld — network.js
-//  Handles all Firebase Realtime Database multiplayer logic:
-//    • Player join / leave (with auto-cleanup on disconnect)
-//    • Real-time position sync for all players
-//    • Live player count
-//    • Chat messages (last 40 kept, older auto-deleted)
+//  WalkWorld 3D — network.js
+//  Handles all Firebase Realtime Database multiplayer logic.
+//
+//  Changes from 2D version:
+//    • joinGame / updatePosition now sync x, y, z, rotationY
+//    • onPlayersUpdate passes all 4 values to the game loop
+//    • Everything else (chat, count, cleanup) is identical
 // ============================================================
 
 import { db, isConfigured } from './firebase-config.js';
@@ -23,9 +24,9 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
 // ── Internal state ──────────────────────────────────────────
-let _playerId    = null;   // This player's unique Firebase key
-let _playerRef   = null;   // Ref to /players/{id}
-let _unsubscribers = [];   // Functions to call on cleanup
+let _playerId      = null;
+let _playerRef     = null;
+let _unsubscribers = [];
 
 // ── Firebase DB paths ───────────────────────────────────────
 const PATHS = {
@@ -35,75 +36,69 @@ const PATHS = {
 };
 
 // ============================================================
-//  JOIN — call this when the player enters the game
-//  playerData: { name, colour, x, y }
-//  Returns the generated playerId string
+//  JOIN
+//  playerData: { name, colour, x, y, z, rotationY }
 // ============================================================
 export async function joinGame(playerData) {
   if (!isConfigured) {
-    console.warn('[Network] Firebase not configured — running in offline mode.');
+    console.warn('[Network] Firebase not configured — offline mode.');
     return 'offline-' + Math.random().toString(36).slice(2);
   }
 
-  // Push a new slot under /players/
   _playerRef = push(PATHS.players());
   _playerId  = _playerRef.key;
 
-  const data = {
+  await set(_playerRef, {
     name:      playerData.name,
     colour:    playerData.colour,
-    x:         playerData.x,
-    y:         playerData.y,
+    x:         playerData.x      ?? 0,
+    y:         playerData.y      ?? 0,
+    z:         playerData.z      ?? 0,
+    rotationY: playerData.rotationY ?? 0,
     joinedAt:  serverTimestamp(),
-  };
+  });
 
-  // Write initial data
-  await set(_playerRef, data);
-
-  // ── Auto-remove this player when they disconnect ──
   onDisconnect(_playerRef).remove();
-
-  // ── Announce join in chat ──
   _pushSystemChat(`${playerData.name} joined the world`);
 
   return _playerId;
 }
 
 // ============================================================
-//  LEAVE — call this on page unload / manual quit
+//  LEAVE
 // ============================================================
 export async function leaveGame(playerName) {
   if (!_playerRef) return;
 
-  // Remove disconnect handler so it doesn't fire twice
   onDisconnect(_playerRef).cancel();
-
-  // Announce leave
   _pushSystemChat(`${playerName} left the world`);
-
-  // Remove player record
   await remove(_playerRef);
 
-  // Clean up listeners
   _unsubscribers.forEach(fn => fn());
   _unsubscribers = [];
-
   _playerRef = null;
   _playerId  = null;
 }
 
 // ============================================================
-//  UPDATE POSITION — throttled by game loop; call every frame
+//  UPDATE POSITION — called every frame (throttled by game.js)
+//  x, z  = horizontal position in 3D world
+//  y     = vertical position (height)
+//  rotationY = camera/player yaw in radians (for facing direction)
 // ============================================================
-export function updatePosition(x, y) {
+export function updatePosition(x, y, z, rotationY) {
   if (!_playerRef || !isConfigured) return;
-  update(_playerRef, { x: Math.round(x), y: Math.round(y) });
+  update(_playerRef, {
+    x:         Math.round(x * 10) / 10,   // 1 decimal place — smooth but compact
+    y:         Math.round(y * 10) / 10,
+    z:         Math.round(z * 10) / 10,
+    rotationY: Math.round(rotationY * 100) / 100,
+  });
 }
 
 // ============================================================
 //  SUBSCRIBE TO PLAYERS
-//  callback(playersMap) where playersMap = { id: {name,colour,x,y}, ... }
-//  Returns an unsubscribe function
+//  callback receives: { id: { name, colour, x, y, z, rotationY } }
 // ============================================================
 export function onPlayersUpdate(callback) {
   if (!isConfigured) {
@@ -114,12 +109,19 @@ export function onPlayersUpdate(callback) {
   const playersRef = PATHS.players();
 
   const unsub = onValue(playersRef, snapshot => {
-    const raw  = snapshot.val() || {};
-
-    // Exclude this client's own player — the local game loop draws it directly
+    const raw    = snapshot.val() || {};
     const others = {};
+
     for (const [id, data] of Object.entries(raw)) {
-      if (id !== _playerId) others[id] = data;
+      if (id === _playerId) continue;
+      others[id] = {
+        name:      data.name      || 'Player',
+        colour:    data.colour    || '#ffffff',
+        x:         data.x         ?? 0,
+        y:         data.y         ?? 0,
+        z:         data.z         ?? 0,
+        rotationY: data.rotationY ?? 0,
+      };
     }
 
     callback(others);
@@ -131,9 +133,7 @@ export function onPlayersUpdate(callback) {
 }
 
 // ============================================================
-//  GET PLAYER COUNT (live)
-//  callback(count: number) — fires every time someone joins/leaves
-//  Returns an unsubscribe function
+//  PLAYER COUNT
 // ============================================================
 export function getPlayerCount(callback) {
   if (!isConfigured) {
@@ -144,8 +144,7 @@ export function getPlayerCount(callback) {
   const playersRef = PATHS.players();
 
   const unsub = onValue(playersRef, snapshot => {
-    const count = snapshot.exists() ? Object.keys(snapshot.val()).length : 0;
-    callback(count);
+    callback(snapshot.exists() ? Object.keys(snapshot.val()).length : 0);
   });
 
   const unsubFn = () => off(playersRef, 'value', unsub);
@@ -154,32 +153,24 @@ export function getPlayerCount(callback) {
 }
 
 // ============================================================
-//  SEND CHAT MESSAGE
-//  msg: { name, colour, text }
+//  SEND CHAT
 // ============================================================
 export function sendChat(msg) {
-  if (!isConfigured) return;
-  if (!msg.text || !msg.text.trim()) return;
+  if (!isConfigured || !msg.text?.trim()) return;
 
-  const chatRef = PATHS.chat();
-  const newMsg  = push(chatRef);
-
+  const newMsg = push(PATHS.chat());
   set(newMsg, {
     name:   msg.name,
     colour: msg.colour,
-    text:   msg.text.trim().slice(0, 80), // hard cap at 80 chars
+    text:   msg.text.trim().slice(0, 80),
     time:   serverTimestamp(),
     system: false,
   });
-
-  // Prune old messages — keep only the latest 40
   _pruneChat(40);
 }
 
 // ============================================================
-//  SUBSCRIBE TO CHAT (last 40 messages)
-//  callback(messages[]) where each msg = { name, colour, text, system }
-//  Returns an unsubscribe function
+//  SUBSCRIBE TO CHAT
 // ============================================================
 export function onChat(callback) {
   if (!isConfigured) {
@@ -208,33 +199,24 @@ export function onChat(callback) {
 // ============================================================
 //  INTERNAL HELPERS
 // ============================================================
-
-// Push a system/announcement message (join, leave)
 function _pushSystemChat(text) {
   if (!isConfigured) return;
-  const chatRef = PATHS.chat();
-  const newMsg  = push(chatRef);
+  const newMsg = push(PATHS.chat());
   set(newMsg, {
-    name:   '',
-    colour: '#6868a8',
-    text,
-    time:   serverTimestamp(),
-    system: true,
+    name: '', colour: '#6868a8', text,
+    time: serverTimestamp(), system: true,
   });
   _pruneChat(40);
 }
 
-// Delete messages beyond the `keep` limit
 async function _pruneChat(keep) {
   if (!isConfigured) return;
-  // Read all chat keys then delete oldest
   onValue(PATHS.chat(), snapshot => {
     if (!snapshot.exists()) return;
     const keys = Object.keys(snapshot.val());
     if (keys.length > keep) {
-      const toDelete = keys.slice(0, keys.length - keep);
-      toDelete.forEach(k => remove(ref(db, `chat/${k}`)));
+      keys.slice(0, keys.length - keep)
+          .forEach(k => remove(ref(db, `chat/${k}`)));
     }
   }, { onlyOnce: true });
 }
-
