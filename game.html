@@ -44,7 +44,6 @@
   <!-- ── Game wrapper ── -->
   <div id="gameWrapper" class="game-wrapper hidden">
 
-    <!-- Three.js renders directly onto this canvas -->
     <canvas id="gameCanvas" aria-label="3D game world"></canvas>
 
     <!-- Crosshair -->
@@ -53,7 +52,7 @@
       <div class="ch-v"></div>
     </div>
 
-    <!-- HUD top-left: player info + zone -->
+    <!-- HUD top-left -->
     <div class="hud hud-tl" id="hudPlayer">
       <div class="hud-avatar" id="hudAvatar"></div>
       <div class="hud-info">
@@ -63,23 +62,23 @@
       </div>
     </div>
 
-    <!-- HUD top-right: online count -->
+    <!-- HUD top-right -->
     <div class="hud hud-tr" id="hudOnline">
       <span class="dot-pulse"></span>
       <span id="hudCount">0</span> online
     </div>
 
-    <!-- HUD bottom-left: compass + controls -->
+    <!-- HUD bottom-left -->
     <div class="hud-bl">
       <div class="compass" id="compass">
         <span class="compass-dir" id="compassDir">N</span>
       </div>
-      <div class="controls-hint" id="controlsHint">
+      <div class="controls-hint">
         WASD · Move &nbsp;|&nbsp; Mouse · Look &nbsp;|&nbsp; Space · Jump &nbsp;|&nbsp; T · Chat
       </div>
     </div>
 
-    <!-- Chat panel -->
+    <!-- Chat -->
     <div class="chat-panel" id="chatPanel" aria-label="Chat">
       <div class="chat-messages" id="chatMessages"></div>
       <form class="chat-form" id="chatForm" autocomplete="off">
@@ -95,12 +94,11 @@
       </form>
     </div>
 
-  </div><!-- /gameWrapper -->
+  </div>
 
-  <!-- Three.js from CDN — must load before game modules -->
+  <!-- Three.js must load before game modules -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
-  <!-- Game modules -->
   <script type="module" src="js/firebase-config.js"></script>
   <script type="module" src="js/network.js"></script>
   <script type="module" src="js/world.js"></script>
