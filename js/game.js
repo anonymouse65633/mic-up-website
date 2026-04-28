@@ -121,6 +121,7 @@ const btnSettings = document.getElementById('btnSettings');
 const btnCharacter = document.getElementById('btnCharacter');
 const sensSlider  = document.getElementById('spSensSlider');
 const sensValueEl = document.getElementById('spSensVal');
+const lockHint   = document.getElementById('lockHint');
 
 // ============================================================
 //  RUNTIME STATE
@@ -778,7 +779,7 @@ function setupChat(name, colour) {
       e.preventDefault();
       if (isMapOpen)   { closeMap();       return; }
       if (isChatOpen)  { closeChat();      return; }
-      if (isPauseOpen) { closePauseMenu(); return; }
+      if (isPauseOpen) { closePauseMenu(true); return; }
       // Always open the menu on ESC — whether pointer is locked or not.
       // (Previously this only opened when !isPointerLocked(), which caused the
       // menu to not open when Chrome released the lock before the keydown fired.)
@@ -972,20 +973,37 @@ function openPauseMenu(tab = 'main') {
   if (sensValueEl) sensValueEl.textContent = Number(window.WALKWORLD_SENS).toFixed(4);
 }
 
-function closePauseMenu() {
+function closePauseMenu(fromEscape = false) {
   isPauseOpen = false;
   pauseMenu?.classList.add('hidden');
   btnSettings?.classList.remove('active');
-  // Re-acquire pointer lock automatically.
-  // We use a short timeout because browsers block requestPointerLock()
-  // when it's called in the same event tick that ESC released the lock.
-  // Giving the browser one frame to clear that block makes it reliable.
   gameCanvas.focus();
-  setTimeout(() => {
-    if (!isPauseOpen && !isChatOpen && !isMapOpen) {
-      requestPointerLock(gameCanvas);
-    }
-  }, 80);
+
+  if (fromEscape) {
+    // Browsers block requestPointerLock() called shortly after an Escape keydown
+    // (Escape is the browser's own key to EXIT pointer lock, so it temporarily
+    // prevents re-acquisition). A click event is always a trusted gesture and
+    // bypasses this restriction — same reason the Resume button works fine.
+    // Show a lightweight hint and re-acquire on the next click.
+    lockHint?.classList.remove('hidden');
+    const relock = () => {
+      lockHint?.classList.add('hidden');
+      if (!isPauseOpen && !isChatOpen && !isMapOpen) {
+        requestPointerLock(gameCanvas);
+      }
+    };
+    lockHint?.addEventListener('click', relock, { once: true });
+  } else {
+    // Re-acquire pointer lock automatically.
+    // We use a short timeout because browsers block requestPointerLock()
+    // when it's called in the same event tick that ESC released the lock.
+    // Giving the browser one frame to clear that block makes it reliable.
+    setTimeout(() => {
+      if (!isPauseOpen && !isChatOpen && !isMapOpen) {
+        requestPointerLock(gameCanvas);
+      }
+    }, 80);
+  }
 }
 
 // ============================================================
