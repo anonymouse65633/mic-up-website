@@ -385,7 +385,7 @@ export class Renderer {
     ctx.translate(lpx, lpy);
     // Three.js yaw = 0 → looking down -Z (north on minimap).
     // Minimap +Y = +Z world, so arrow pointing "up minimap" = -Z world = yaw 0.
-    ctx.rotate(localPlayer.yaw + Math.PI);
+    ctx.rotate(-localPlayer.yaw);
     ctx.fillStyle = '#00f5c4';
     ctx.beginPath();
     ctx.moveTo(0, -8);
