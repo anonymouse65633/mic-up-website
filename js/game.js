@@ -50,6 +50,7 @@ const DEFAULT_BINDS = {
   jump    : 'Space',
   sprint  : 'ShiftLeft',
   chat    : 'KeyT',
+  map     : 'KeyM',
 };
 
 // Pretty-print a KeyboardEvent.code string for UI labels
@@ -132,9 +133,31 @@ let lastTime      = 0;
 let rafId         = null;
 let isChatOpen    = false;
 let isPauseOpen   = false;
+let isMapOpen     = false;
 
 let _lastPosSend = 0;
 const POS_INTERVAL = 100; // ms between Firebase position writes (~10 Hz)
+
+// ── Map overlay ──────────────────────────────────────────────
+const MAP_ZOOM_MIN  = 1;
+const MAP_ZOOM_MAX  = 8;
+let   mapZoom       = 1;
+let   _mapWorldCanvas = null; // cached background (one pixel per world unit)
+
+const MAP_ZONE_COLS = {
+  Forest: '#1a3a10',
+  Plains: '#2d6b22',
+  Lake:   '#1a5fa8',
+  Cabin:  '#7a5428',
+  Plaza:  '#606070',
+};
+const MAP_ZONE_LABELS = [
+  { name: 'FOREST', wx: -60, wz: -40 },
+  { name: 'PLAINS', wx:  28, wz:  30 },
+  { name: 'LAKE',   wx:  62, wz:  55 },
+  { name: 'CABIN',  wx:  55, wz: -62 },
+  { name: 'PLAZA',  wx:   0, wz:   0 },
+];
 
 // ============================================================
 //  BOOT
@@ -203,6 +226,8 @@ async function init() {
   setupPointerLock();
   setupPauseMenu();
   buildMinimapCache();
+  buildMapWorldCanvas();
+  setupMap();
   initAvatarPreview();
 
   setLoad(100, 'Ready!');
@@ -254,6 +279,7 @@ function gameLoop(timestamp) {
   updateHUD();
   updateCompass();
   updateMinimap();
+  if (isMapOpen) drawMap();
 
   renderer.draw(player, remotePlayers, timestamp);
 
@@ -304,48 +330,63 @@ function updateCompass() {
 
   compassCtx.clearRect(0, 0, W, H);
 
-  // Background
-  compassCtx.fillStyle = 'rgba(13,13,26,0.80)';
-  compassCtx.beginPath();
-  compassCtx.roundRect(0, 0, W, H, [0, 0, 6, 6]);
-  compassCtx.fill();
+  // Background — plain fillRect avoids roundRect browser-compat issues
+  compassCtx.fillStyle = 'rgba(10,10,22,0.92)';
+  compassCtx.fillRect(0, 0, W, H);
+
+  // Accent border along the bottom edge
+  compassCtx.fillStyle = 'rgba(0,245,196,0.55)';
+  compassCtx.fillRect(0, H - 2, W, 2);
 
   // Ticks and labels — draw ±90° either side of current bearing
   for (let offset = -90; offset <= 90; offset++) {
     const deg = ((bearing + offset) % 360 + 360) % 360;
-    const sx  = W / 2 + offset * DEG_PX;
+    const sx  = Math.round(W / 2 + offset * DEG_PX);
 
     const isMajor = deg % 45 === 0;
     const isMid   = deg % 15 === 0 && !isMajor;
-
-    if (isMajor || isMid) {
-      const tickH = isMajor ? H * 0.50 : H * 0.28;
-      compassCtx.fillStyle = isMajor
-        ? 'rgba(0,245,196,0.95)'
-        : 'rgba(255,255,255,0.35)';
-      compassCtx.fillRect(Math.round(sx) - 0.5, (H - tickH) / 2, 1, tickH);
-    }
+    const isMinor = deg % 5  === 0 && !isMajor && !isMid;
 
     if (isMajor) {
+      // Bold bright tick
+      compassCtx.fillStyle = 'rgba(0,245,196,1)';
+      compassCtx.fillRect(sx - 1, 2, 2, H * 0.55);
+
       const label = CARDINAL.find(([v]) => v === deg);
       if (label) {
-        compassCtx.font         = '700 10px "Press Start 2P", monospace';
-        compassCtx.fillStyle    = 'rgba(0,245,196,1)';
+        // Use a reliable system font so it renders even before web-fonts load
+        compassCtx.font         = 'bold 10px "Courier New", monospace';
+        compassCtx.fillStyle    = '#00f5c4';
         compassCtx.textAlign    = 'center';
         compassCtx.textBaseline = 'bottom';
-        compassCtx.fillText(label[1], sx, H - 3);
+        compassCtx.fillText(label[1], sx, H - 4);
       }
+    } else if (isMid) {
+      compassCtx.fillStyle = 'rgba(255,255,255,0.45)';
+      const th = H * 0.30;
+      compassCtx.fillRect(sx, (H - th) * 0.45, 1, th);
+    } else if (isMinor) {
+      compassCtx.fillStyle = 'rgba(255,255,255,0.18)';
+      const th = H * 0.18;
+      compassCtx.fillRect(sx, (H - th) * 0.5, 1, th);
     }
   }
 
-  // Centre marker — small downward-pointing triangle
+  // Centre marker — downward-pointing triangle at top edge
   compassCtx.fillStyle = '#ffffff';
   compassCtx.beginPath();
-  compassCtx.moveTo(W / 2 - 5, 0);
-  compassCtx.lineTo(W / 2 + 5, 0);
-  compassCtx.lineTo(W / 2,     6);
+  compassCtx.moveTo(W / 2 - 6, 0);
+  compassCtx.lineTo(W / 2 + 6, 0);
+  compassCtx.lineTo(W / 2,     8);
   compassCtx.closePath();
   compassCtx.fill();
+
+  // Degree readout in the centre notch area
+  compassCtx.font      = 'bold 9px "Courier New", monospace';
+  compassCtx.fillStyle = 'rgba(255,255,255,0.70)';
+  compassCtx.textAlign = 'center';
+  compassCtx.textBaseline = 'top';
+  compassCtx.fillText(Math.round(bearing) + '°', W / 2, 10);
 }
 
 // ============================================================
@@ -447,8 +488,228 @@ function updateMinimap() {
 }
 
 // ============================================================
-//  POINTER LOCK
+//  WORLD MAP  (M key — expandable fullscreen overlay)
+//
+//  _mapWorldCanvas  — 200×200 px canvas, one px per world unit,
+//                     baked once with zone colours.
+//  openMap()        — sizes the overlay canvas, shows the modal
+//  closeMap()       — hides modal, re-acquires pointer lock
+//  drawMap()        — called every frame when map is open;
+//                     draws zones → labels → remote dots → local
+//  setupMap()       — wires up buttons and scroll-wheel zoom
 // ============================================================
+
+function buildMapWorldCanvas() {
+  const SIZE = 200; // 1 px per world unit (world is ±100 on each axis)
+  _mapWorldCanvas = document.createElement('canvas');
+  _mapWorldCanvas.width  = SIZE;
+  _mapWorldCanvas.height = SIZE;
+  const ctx = _mapWorldCanvas.getContext('2d');
+
+  // Sample every 2 world units (100×100 cells, each 2 px)
+  for (let iz = 0; iz < SIZE; iz += 2) {
+    for (let ix = 0; ix < SIZE; ix += 2) {
+      const wx = ix - 100;
+      const wz = iz - 100;
+      ctx.fillStyle = MAP_ZONE_COLS[getZoneName(wx, wz)] || '#1a3a10';
+      ctx.fillRect(ix, iz, 2, 2);
+    }
+  }
+
+  // World border
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+  ctx.lineWidth   = 1;
+  ctx.strokeRect(0.5, 0.5, SIZE - 1, SIZE - 1);
+}
+
+function openMap() {
+  const mapCanvas = document.getElementById('mapCanvas');
+  if (!mapCanvas) return;
+
+  // Size the canvas to ~80 % of the smaller screen dimension, max 700 px
+  const sz = Math.min(Math.floor(window.innerWidth * 0.78),
+                      Math.floor(window.innerHeight * 0.75), 700);
+  mapCanvas.width  = sz;
+  mapCanvas.height = sz;
+
+  mapZoom = 1;
+  _updateMapZoomUI();
+
+  isMapOpen = true;
+  document.getElementById('mapOverlay')?.classList.remove('hidden');
+  if (isPointerLocked()) document.exitPointerLock();
+}
+
+function closeMap() {
+  isMapOpen = false;
+  document.getElementById('mapOverlay')?.classList.add('hidden');
+  // Re-acquire pointer lock automatically (same pattern as closePauseMenu)
+  lockOverlay.classList.add('hidden');
+  requestPointerLock(gameCanvas);
+}
+
+function _updateMapZoomUI() {
+  const el = document.getElementById('mapZoomDisplay');
+  if (el) el.textContent = mapZoom.toFixed(1) + '×';
+}
+
+function drawMap() {
+  const mapCanvas = document.getElementById('mapCanvas');
+  if (!mapCanvas || !_mapWorldCanvas) return;
+  const ctx = mapCanvas.getContext('2d');
+  if (!ctx) return;
+
+  const W = mapCanvas.width;
+  const H = mapCanvas.height;
+
+  // ── Background ──────────────────────────────────────────
+  ctx.fillStyle = '#0a0a16';
+  ctx.fillRect(0, 0, W, H);
+
+  // ── World image: scale+pan via drawImage source rect ────
+  //
+  // At zoom=1  → full 200×200 world fits the canvas.
+  //   srcW = srcH = 200,  srcX = srcY = 0
+  // At zoom>1  → we see only (200/zoom) world units.
+  //   We centre on the player.
+  //
+  const WORLD = 200;
+  const srcSide = WORLD / mapZoom;
+  // Centre of view in world-canvas pixels (0…200)
+  const cx = mapZoom > 1.2 ? (player.x + 100) : WORLD / 2;
+  const cz = mapZoom > 1.2 ? (player.z + 100) : WORLD / 2;
+  const srcX = Math.max(0, Math.min(WORLD - srcSide, cx - srcSide / 2));
+  const srcZ = Math.max(0, Math.min(WORLD - srcSide, cz - srcSide / 2));
+
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(_mapWorldCanvas, srcX, srcZ, srcSide, srcSide, 0, 0, W, H);
+
+  // ── Grid lines every 25 world units (major zones) ───────
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+  ctx.lineWidth   = 1;
+  const gridStep  = 25; // world units
+  const scale     = W / srcSide;
+  for (let gw = Math.ceil((srcX - srcX % gridStep) / gridStep) * gridStep;
+       gw <= srcX + srcSide; gw += gridStep) {
+    const sx = (gw - srcX) * scale;
+    ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, H); ctx.stroke();
+  }
+  for (let gz = Math.ceil((srcZ - srcZ % gridStep) / gridStep) * gridStep;
+       gz <= srcZ + srcSide; gz += gridStep) {
+    const sy = (gz - srcZ) * scale;
+    ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(W, sy); ctx.stroke();
+  }
+
+  // ── Helper: world → canvas px ───────────────────────────
+  // wx/wz in world coords (±100).  srcX/srcZ are in world-canvas px (0…200).
+  const toC = (wx, wz) => ({
+    cx: ((wx + 100) - srcX) * scale,
+    cy: ((wz + 100) - srcZ) * scale,
+  });
+
+  // ── Zone labels ──────────────────────────────────────────
+  const labelSize = Math.max(8, Math.min(12, 9 * mapZoom * 0.5));
+  ctx.font        = `bold ${labelSize}px "Courier New", monospace`;
+  ctx.textAlign   = 'center';
+  ctx.textBaseline = 'middle';
+  MAP_ZONE_LABELS.forEach(({ name, wx, wz }) => {
+    const { cx: lx, cy: ly } = toC(wx, wz);
+    if (lx < -30 || lx > W + 30 || ly < -20 || ly > H + 20) return;
+    ctx.fillStyle = 'rgba(255,255,255,0.45)';
+    ctx.fillText(name, lx, ly);
+  });
+
+  // ── Remote player dots ───────────────────────────────────
+  const dotR = Math.max(3, 3.5 * Math.min(mapZoom, 3) * 0.5);
+  ctx.textBaseline = 'bottom';
+  ctx.font = `${Math.max(10, 11 * mapZoom * 0.4)}px "VT323", monospace`;
+  for (const p of Object.values(remotePlayers)) {
+    const { cx: px, cy: py } = toC(p.x ?? 0, p.z ?? 0);
+    if (px < -12 || px > W + 12 || py < -12 || py > H + 12) continue;
+    ctx.fillStyle = p.colour || '#ffffff';
+    ctx.beginPath();
+    ctx.arc(px, py, dotR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.80)';
+    ctx.textAlign = 'center';
+    ctx.fillText(p.name || '?', px, py - dotR - 1);
+  }
+
+  // ── Local player ─────────────────────────────────────────
+  const { cx: lx, cy: ly } = toC(player.x, player.z);
+
+  // Pulse ring
+  ctx.strokeStyle = 'rgba(0,245,196,0.40)';
+  ctx.lineWidth   = 2;
+  ctx.beginPath();
+  ctx.arc(lx, ly, 11, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Filled dot
+  ctx.fillStyle   = '#ffffff';
+  ctx.strokeStyle = '#00f5c4';
+  ctx.lineWidth   = 2;
+  ctx.beginPath();
+  ctx.arc(lx, ly, 5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  // Direction arrow
+  const bearing  = -player.yaw;
+  const arrowLen = Math.max(14, 14 * Math.min(mapZoom, 3) * 0.5);
+  ctx.strokeStyle = '#00f5c4';
+  ctx.lineWidth   = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(lx, ly);
+  ctx.lineTo(lx + Math.sin(bearing) * arrowLen, ly - Math.cos(bearing) * arrowLen);
+  ctx.stroke();
+
+  // Player name
+  ctx.font        = `bold 10px "Courier New", monospace`;
+  ctx.fillStyle   = '#00f5c4';
+  ctx.textAlign   = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText(player.name, lx, ly - 13);
+
+  // ── HUD overlay (zoom level, coords, hint) ───────────────
+  ctx.textBaseline = 'top';
+  ctx.textAlign    = 'left';
+  ctx.fillStyle    = 'rgba(0,245,196,0.90)';
+  ctx.font         = 'bold 11px "Courier New", monospace';
+  ctx.fillText(`${mapZoom.toFixed(1)}×`, 10, 10);
+
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.font      = '10px "Courier New", monospace';
+  ctx.fillText(`${Math.round(player.x)}, ${Math.round(player.z)}`, 10, 28);
+
+  ctx.textAlign = 'right';
+  ctx.fillStyle = 'rgba(255,255,255,0.35)';
+  ctx.fillText('M · Close  |  Scroll · Zoom', W - 10, 10);
+}
+
+function setupMap() {
+  document.getElementById('mapClose')?.addEventListener('click', closeMap);
+
+  document.getElementById('mapZoomIn')?.addEventListener('click', () => {
+    mapZoom = Math.min(MAP_ZOOM_MAX, parseFloat((mapZoom * 1.5).toFixed(2)));
+    _updateMapZoomUI();
+  });
+
+  document.getElementById('mapZoomOut')?.addEventListener('click', () => {
+    mapZoom = Math.max(MAP_ZOOM_MIN, parseFloat((mapZoom / 1.5).toFixed(2)));
+    _updateMapZoomUI();
+  });
+
+  // Scroll-wheel zoom on the overlay
+  document.getElementById('mapOverlay')?.addEventListener('wheel', e => {
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+    mapZoom = Math.max(MAP_ZOOM_MIN, Math.min(MAP_ZOOM_MAX,
+      parseFloat((mapZoom * factor).toFixed(2))
+    ));
+    _updateMapZoomUI();
+  }, { passive: false });
+}
 function setupPointerLock() {
   // Clicking the lock overlay captures the mouse
   lockOverlay.addEventListener('click', () => {
@@ -476,7 +737,16 @@ function setupPointerLock() {
 // ============================================================
 function setupChat(name, colour) {
   document.addEventListener('keydown', e => {
-    const chatKey = (window.WALKWORLD_BINDS || DEFAULT_BINDS).chat;
+    const binds  = window.WALKWORLD_BINDS || DEFAULT_BINDS;
+    const chatKey = binds.chat;
+    const mapKey  = binds.map || 'KeyM';
+
+    // Map toggle — works whenever gameplay is live (not in chat/pause)
+    if (e.code === mapKey && !isChatOpen && !isPauseOpen) {
+      e.preventDefault();
+      isMapOpen ? closeMap() : openMap();
+      return;
+    }
 
     if (e.code === chatKey && !isChatOpen && !isPauseOpen && isPointerLocked()) {
       e.preventDefault();
@@ -485,6 +755,7 @@ function setupChat(name, colour) {
     }
 
     if (e.code === 'Escape') {
+      if (isMapOpen)   { closeMap();       return; }
       if (isChatOpen)  { closeChat();      return; }
       if (isPauseOpen) { closePauseMenu(); return; }
       // If pointer wasn't locked (e.g. already on lock overlay),
