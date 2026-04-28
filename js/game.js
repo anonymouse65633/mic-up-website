@@ -665,7 +665,11 @@ function closePauseMenu() {
   isPauseOpen = false;
   pauseMenu?.classList.add('hidden');
   btnSettings?.classList.remove('active');
-  lockOverlay.classList.remove('hidden');
+  // Re-acquire pointer lock automatically — no need to click the canvas again.
+  // Hide the overlay pre-emptively; the pointerlockchange handler will re-show
+  // it if the browser denies the request for any reason.
+  lockOverlay.classList.add('hidden');
+  requestPointerLock(gameCanvas);
 }
 
 // ============================================================
