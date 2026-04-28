@@ -90,7 +90,8 @@
         Mouse&nbsp;·&nbsp;Look &nbsp;|&nbsp;
         Space&nbsp;·&nbsp;Jump &nbsp;|&nbsp;
         T&nbsp;·&nbsp;Chat &nbsp;|&nbsp;
-        M&nbsp;·&nbsp;Map
+        M&nbsp;·&nbsp;Map &nbsp;|&nbsp;
+        1/2&nbsp;·&nbsp;Item
       </div>
       <div class="hud-icon-row">
         <button id="btnSettings" class="hud-icon-btn" title="Settings (ESC)" aria-label="Open settings">⚙</button>
@@ -232,8 +233,7 @@
           </div>
 
           <div class="sp-reset-row">
-            <button id="pmApplyAvatar" class="pm-item pm-item-resume" style="flex:1;margin-right:8px;padding:8px 0;font-size:11px;">Apply</button>
-            <button id="pmAvatarReset" class="sp-reset-btn">Reset</button>
+            <button id="pmAvatarReset" class="sp-reset-btn">Reset Avatar</button>
           </div>
 
         </div>
@@ -270,6 +270,22 @@
       </div>
     </div>
 
+    <!-- ══════════════════════════════════════════════════
+         HOTBAR  (bottom centre — press 1 / 2 to switch)
+         ══════════════════════════════════════════════════ -->
+    <div class="hotbar" id="hotbar" aria-label="Item hotbar">
+      <div class="hotbar-slot active" id="hotbarSlot1" data-slot="1" title="Shovel [1]">
+        <div class="hotbar-slot-key">1</div>
+        <div class="hotbar-slot-icon">⛏️</div>
+        <div class="hotbar-slot-label">Shovel</div>
+      </div>
+      <div class="hotbar-slot" id="hotbarSlot2" data-slot="2" title="Item Detector [2]">
+        <div class="hotbar-slot-key">2</div>
+        <div class="hotbar-slot-icon">📡</div>
+        <div class="hotbar-slot-label">Detector</div>
+      </div>
+    </div>
+
   </div><!-- /#gameWrapper -->
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -282,6 +298,35 @@
   <script type="module" src="js/renderer.js"></script>
   <script type="module" src="js/game.js"></script>
 
+  <!-- ── Hotbar slot switching (1 / 2 keys) ── -->
+  <script>
+    (function () {
+      const SLOTS = {
+        '1': document.getElementById('hotbarSlot1'),
+        '2': document.getElementById('hotbarSlot2'),
+      };
+
+      let activeSlot = '1';
+
+      function selectSlot(key) {
+        if (!SLOTS[key] || key === activeSlot) return;
+        SLOTS[activeSlot].classList.remove('active');
+        SLOTS[key].classList.add('active');
+        activeSlot = key;
+        // Expose for other scripts: window.HOTBAR_SLOT = '1' | '2'
+        window.HOTBAR_SLOT = key;
+      }
+
+      window.HOTBAR_SLOT = activeSlot;
+
+      window.addEventListener('keydown', function (e) {
+        // Only fire when NOT typing in an input / chat
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        if (e.code === 'Digit1') selectSlot('1');
+        if (e.code === 'Digit2') selectSlot('2');
+      });
+    })();
+  </script>
 
 
 </body></html>
