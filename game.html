@@ -1,13 +1,11 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<html lang="en"><head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>WalkWorld 3D — Playing</title>
-  <link rel="stylesheet" href="css/style.css" />
-  <link rel="stylesheet" href="css/game.css" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323:wght@400&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/game.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&amp;family=VT323:wght@400&amp;display=swap" rel="stylesheet">
 </head>
 <body class="game-page">
 
@@ -56,7 +54,7 @@
          CoD-STYLE COMPASS BAR  (top centre)
          ══════════════════════════════════════════════════ -->
     <div class="compass-bar-wrap" aria-hidden="true">
-      <canvas id="compassCanvas" width="600" height="32"></canvas>
+      <canvas id="compassCanvas" width="960" height="32"></canvas>
       <div class="compass-notch"></div>
     </div>
 
@@ -67,7 +65,7 @@
       <div class="hud-avatar" id="hudAvatar"></div>
       <div class="hud-info">
         <span class="hud-name" id="hudName">—</span>
-        <span class="hud-pos"  id="hudPos">0, 0, 0</span>
+        <span class="hud-pos" id="hudPos">0, 0, 0</span>
         <span class="hud-zone" id="hudZone">Plains</span>
       </div>
     </div>
@@ -134,7 +132,7 @@
             <span class="pm-item-label">Reset Character</span>
           </button>
 
-          <button id="pmJoin" class="pm-item pm-item-soon" disabled>
+          <button id="pmJoin" class="pm-item pm-item-soon" disabled="">
             <span class="pm-item-icon">🔗</span>
             <span class="pm-item-label">Join Friend</span>
             <span class="pm-item-badge">SOON</span>
@@ -160,9 +158,7 @@
             <p class="sp-section-title">MOUSE SENSITIVITY</p>
             <div class="sp-sens-row">
               <label for="spSensSlider">Sensitivity</label>
-              <input id="spSensSlider" class="sp-slider" type="range"
-                     min="0.0005" max="0.0080" step="0.0001" value="0.0022"
-                     aria-label="Mouse sensitivity" />
+              <input id="spSensSlider" class="sp-slider" type="range" min="0.0005" max="0.0080" step="0.0001" value="0.0022" aria-label="Mouse sensitivity">
               <span id="spSensVal" class="sp-sens-val">0.0022</span>
             </div>
           </div>
@@ -223,8 +219,7 @@
                 <p class="pm-av-label">HEIGHT &nbsp;<span id="pmHeightVal">1.00×</span></p>
                 <div class="sp-sens-row">
                   <span style="font-size:13px;color:var(--c-muted)">Short</span>
-                  <input id="pmHeightSlider" class="sp-slider" type="range"
-                         min="0.70" max="1.40" step="0.01" value="1.00" />
+                  <input id="pmHeightSlider" class="sp-slider" type="range" min="0.70" max="1.40" step="0.01" value="1.00">
                   <span style="font-size:13px;color:var(--c-muted)">Tall</span>
                 </div>
               </div>
@@ -246,8 +241,7 @@
     <div class="chat-panel" id="chatPanel" aria-label="Chat">
       <div class="chat-messages" id="chatMessages"></div>
       <form class="chat-form" id="chatForm" autocomplete="off">
-        <input id="chatInput" class="chat-input" type="text" maxlength="80"
-               placeholder="Press T to chat…" disabled />
+        <input id="chatInput" class="chat-input" type="text" maxlength="80" placeholder="Press T to chat…" disabled="">
         <button class="chat-send" type="submit" aria-label="Send">▶</button>
       </form>
     </div>
@@ -261,9 +255,9 @@
           <span class="map-title">🗺&nbsp; WORLD MAP</span>
           <div class="map-zoom-btns">
             <button id="mapZoomOut" class="map-zoom-btn" title="Zoom out (scroll ↓)" aria-label="Zoom out">−</button>
-            <span   id="mapZoomDisplay" class="map-zoom-val">1.0×</span>
-            <button id="mapZoomIn"  class="map-zoom-btn" title="Zoom in (scroll ↑)" aria-label="Zoom in">+</button>
-            <button id="mapClose"   class="map-close-btn" title="Close map (M / ESC)" aria-label="Close map">✕</button>
+            <span id="mapZoomDisplay" class="map-zoom-val">1.0×</span>
+            <button id="mapZoomIn" class="map-zoom-btn" title="Zoom in (scroll ↑)" aria-label="Zoom in">+</button>
+            <button id="mapClose" class="map-close-btn" title="Close map (M / ESC)" aria-label="Close map">✕</button>
           </div>
         </div>
         <canvas id="mapCanvas" class="map-canvas"></canvas>
@@ -282,5 +276,6 @@
   <script type="module" src="js/renderer.js"></script>
   <script type="module" src="js/game.js"></script>
 
-</body>
-</html>
+
+
+</body></html>
