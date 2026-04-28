@@ -1,513 +1,413 @@
 // ============================================================
-//  WalkWorld — renderer.js
-//  Draws everything to the game canvas each frame:
-//    • Tile map   (viewport-culled for performance)
-//    • Decorations (trees, flowers, rocks, etc.)
-//    • Remote players (coloured circles + nametags)
-//    • Local player
-//    • Chat bubbles above players
-//    • Minimap (top-down overview)
+//  WalkWorld 3D — renderer.js  (REWRITE)
+//
+//  Responsibilities
+//  ────────────────────────────────────────────────────────────
+//  • THREE.WebGLRenderer  — renders the 3D scene every frame
+//  • Remote player meshes — Roblox-style block characters added
+//    to / removed from the scene automatically
+//  • Overlay canvas       — name tags + chat bubbles projected
+//    from 3D world-space to 2D screen-space each frame
+//  • Minimap canvas       — circular, baked zone-colour BG +
+//    live player dots + local-player direction arrow
+//
+//  Public API
+//  ────────────────────────────────────────────────────────────
+//  new Renderer(gameCanvas)
+//  renderer.addBubble(playerId, text)
+//  renderer.draw(localPlayer, remotePlayers, timestamp)
+//
+//  game.js passes (gameCanvas, minimapCanvas) — the second arg
+//  is ignored; we create our own internal canvases.
 // ============================================================
 
-import {
-  TILE, TILE_DEF, TILE_SIZE,
-  WORLD_W, WORLD_H, WORLD_PX, WORLD_PY,
-  tileMap, decorations, DECO,
-} from './world.js';
+import { scene, WORLD_SIZE, HALF, getZoneName } from './world.js';
+import { camera }                                from './player.js';
 
-// ── Camera smooth-follow settings ───────────────────────────
-const CAM_LERP    = 0.10;  // 0=no follow, 1=instant snap
-const PLAYER_R    = 14;    // local player circle radius (px)
-const REMOTE_R    = 13;    // remote player circle radius
-const NAME_FONT   = '9px "Press Start 2P", monospace';
-const BUBBLE_FONT = '15px "VT323", monospace';
+// ── Minimap constants ─────────────────────────────────────────
+const MINIMAP_SIZE = 130;   // px (displayed square, CSS clips to circle)
+const MINIMAP_RES  = 64;    // grid resolution for the baked background
 
-// Pre-sort decorations so trees (tall) draw after ground-level items
-const DECO_ORDER  = [DECO.FLOWER, DECO.MUSHROOM, DECO.ROCK, DECO.BUSH, DECO.SIGN, DECO.TREE];
-const sortedDecos = [...decorations].sort(
-  (a, b) => DECO_ORDER.indexOf(a.type) - DECO_ORDER.indexOf(b.type)
-);
+// Zone → fill colour for the baked minimap background
+const ZONE_COLOR = {
+  Forest: '#1a4010',
+  Lake:   '#1a5fa8',
+  Cabin:  '#7a5020',
+  Plaza:  '#505060',
+  Plains: '#2a5c18',
+};
 
-// Separate flower/ground decos from solid decos for layering
-const groundDecos = sortedDecos.filter(d =>
-  d.type === DECO.FLOWER || d.type === DECO.MUSHROOM
-);
-const solidDecos = sortedDecos.filter(d =>
-  d.type !== DECO.FLOWER && d.type !== DECO.MUSHROOM
-);
+// ── Block-character geometry (built once, shared) ─────────────
+let _geoms = null;
 
-// ── Water animation ──────────────────────────────────────────
-let _waterOffset = 0;
+function sharedGeoms() {
+  if (_geoms) return _geoms;
+  _geoms = {
+    head:  new THREE.BoxGeometry(0.55, 0.55, 0.55),
+    torso: new THREE.BoxGeometry(0.55, 0.70, 0.30),
+    limb:  new THREE.BoxGeometry(0.22, 0.55, 0.22),
+    leg:   new THREE.BoxGeometry(0.22, 0.60, 0.22),
+  };
+  return _geoms;
+}
 
-// ── Minimap tile cache ───────────────────────────────────────
-let _minimapCache = null;
+/**
+ * Build a Roblox-style block character THREE.Group.
+ * Children layout (by index):
+ *   0 head · 1 torso · 2 lArm · 3 rArm · 4 lLeg · 5 rLeg
+ *
+ * @param {string} colour — hex colour for shirt / body
+ */
+function makeBlockChar(colour) {
+  const g    = sharedGeoms();
+  const body = new THREE.MeshLambertMaterial({ color: colour });
+  const skin = new THREE.MeshLambertMaterial({ color: 0xf0c890 });
+  const pant = new THREE.MeshLambertMaterial({
+    color: new THREE.Color(colour).multiplyScalar(0.55),
+  });
+
+  const group = new THREE.Group();
+
+  // Head (skin-coloured)
+  const head = new THREE.Mesh(g.head, skin);
+  head.position.y = 1.60;
+  group.add(head);                   // [0]
+
+  // Torso
+  const torso = new THREE.Mesh(g.torso, body);
+  torso.position.y = 0.95;
+  group.add(torso);                  // [1]
+
+  // Arms
+  const lArm = new THREE.Mesh(g.limb, body);
+  lArm.position.set(-0.40, 0.96, 0);
+  group.add(lArm);                   // [2]
+
+  const rArm = new THREE.Mesh(g.limb, body);
+  rArm.position.set( 0.40, 0.96, 0);
+  group.add(rArm);                   // [3]
+
+  // Legs
+  const lLeg = new THREE.Mesh(g.leg, pant);
+  lLeg.position.set(-0.17, 0.35, 0);
+  group.add(lLeg);                   // [4]
+
+  const rLeg = new THREE.Mesh(g.leg, pant);
+  rLeg.position.set( 0.17, 0.35, 0);
+  group.add(rLeg);                   // [5]
+
+  return group;
+}
 
 // ============================================================
 //  RENDERER CLASS
 // ============================================================
 export class Renderer {
-  constructor(canvas, minimapCanvas) {
-    this.canvas  = canvas;
-    this.ctx     = canvas.getContext('2d');
-    this.miniCtx = minimapCanvas ? minimapCanvas.getContext('2d') : null;
-    this.miniW   = minimapCanvas?.width  ?? 120;
-    this.miniH   = minimapCanvas?.height ?? 120;
 
-    // Camera position in world pixels (top-left of viewport)
-    this.camX = 0;
-    this.camY = 0;
+  /**
+   * @param {HTMLCanvasElement} gameCanvas — the main #gameCanvas
+   * @param {HTMLCanvasElement} [_ignored] — kept for API compat
+   */
+  constructor(gameCanvas, _ignored) {
+    this.canvas = gameCanvas;
 
-    // Chat bubble store: { [playerId]: { text, expires } }
+    // ── THREE.WebGLRenderer ──────────────────────────────────
+    this.webgl = new THREE.WebGLRenderer({
+      canvas:    gameCanvas,
+      antialias: true,
+    });
+    this.webgl.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.webgl.setSize(window.innerWidth, window.innerHeight);
+
+    const wrapper = gameCanvas.parentElement;
+
+    // ── 2-D overlay (name tags + chat bubbles) ───────────────
+    this._overlay    = _mkCanvas('position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:5;');
+    this._overlayCtx = this._overlay.getContext('2d');
+    wrapper.appendChild(this._overlay);
+    this._resizeOverlay();
+
+    // ── Minimap canvas ───────────────────────────────────────
+    this._miniCanvas = _mkCanvas(`
+      position:absolute; top:70px; right:14px;
+      width:${MINIMAP_SIZE}px; height:${MINIMAP_SIZE}px;
+      border-radius:50%;
+      border:2px solid rgba(255,255,255,0.22);
+      box-shadow:0 0 8px rgba(0,0,0,0.5);
+      z-index:15; pointer-events:none;
+    `);
+    this._miniCanvas.width  = MINIMAP_SIZE;
+    this._miniCanvas.height = MINIMAP_SIZE;
+    this._miniCtx           = this._miniCanvas.getContext('2d');
+    wrapper.appendChild(this._miniCanvas);
+
+    // Bake the static zone-colour background (runs once)
+    this._minimapBg = this._bakeMinimap();
+
+    // ── Remote player state ──────────────────────────────────
+    // { [id]: THREE.Group }
+    this._remoteGroups = {};
+
+    // ── Chat bubble store ────────────────────────────────────
+    // { [id]: { text: string, expires: number } }
     this._bubbles = {};
 
-    this._resizeCanvas();
-    window.addEventListener('resize', () => this._resizeCanvas());
+    // ── Resize handler ───────────────────────────────────────
+    window.addEventListener('resize', () => {
+      this.webgl.setSize(window.innerWidth, window.innerHeight);
+      this._resizeOverlay();
+    });
   }
 
-  // ── Public: add a chat bubble for a player ──
-  addBubble(playerId, text) {
-    this._bubbles[playerId] = {
-      text: text.slice(0, 40),
+  // ── Public: register a chat bubble ───────────────────────
+  addBubble(id, text) {
+    this._bubbles[id] = {
+      text:    text.slice(0, 40),
       expires: performance.now() + 4000,
     };
   }
 
-  // ── Main draw call (called every animation frame) ──────────
+  // ── Main draw call ────────────────────────────────────────
   draw(localPlayer, remotePlayers, timestamp) {
-    const ctx = this.ctx;
-    const vw  = this.canvas.width;
-    const vh  = this.canvas.height;
+    this._syncRemotePlayers(remotePlayers, timestamp);
 
-    // Advance water shimmer
-    _waterOffset = (timestamp * 0.0008) % 1;
+    // 3-D render
+    this.webgl.render(scene, camera);
 
-    // ── Smooth camera follow ──
-    const targetX = localPlayer.x - vw / 2;
-    const targetY = localPlayer.y - vh / 2;
-    this.camX += (targetX - this.camX) * CAM_LERP;
-    this.camY += (targetY - this.camY) * CAM_LERP;
+    // 2-D overlay
+    this._drawOverlay(remotePlayers);
 
-    // Clamp camera to world bounds
-    this.camX = Math.max(0, Math.min(this.camX, WORLD_PX - vw));
-    this.camY = Math.max(0, Math.min(this.camY, WORLD_PY - vh));
+    // Minimap
+    this._drawMinimap(localPlayer, remotePlayers);
 
-    const cx = Math.round(this.camX);
-    const cy = Math.round(this.camY);
+    // Prune expired bubbles
+    const now = performance.now();
+    for (const id in this._bubbles) {
+      if (now > this._bubbles[id].expires) delete this._bubbles[id];
+    }
+  }
 
-    // ── Clear ──
-    ctx.clearRect(0, 0, vw, vh);
+  // ── Sync remote player block chars in the scene ───────────
+  _syncRemotePlayers(remotePlayers, timestamp) {
+    const live = new Set(Object.keys(remotePlayers));
 
-    // ── Draw world ──
-    ctx.save();
-    ctx.translate(-cx, -cy);
+    // Remove stale groups
+    for (const id of Object.keys(this._remoteGroups)) {
+      if (!live.has(id)) {
+        scene.remove(this._remoteGroups[id]);
+        delete this._remoteGroups[id];
+      }
+    }
 
-    this._drawTiles(cx, cy, vw, vh, timestamp);
-    this._drawDecos(groundDecos, cx, cy, vw, vh);
+    const t = timestamp * 0.003; // walk cycle time
 
-    // Draw remote players (behind trees)
     for (const [id, p] of Object.entries(remotePlayers)) {
-      this._drawPlayer(p.x, p.y, p.colour, p.name, REMOTE_R, false);
-      this._drawBubble(ctx, id, p.x, p.y - REMOTE_R);
-    }
+      // Create group if new player
+      if (!this._remoteGroups[id]) {
+        const grp = makeBlockChar(p.colour || '#ffffff');
+        this._remoteGroups[id] = grp;
+        scene.add(grp);
+      }
 
-    // Draw solid decorations (trees in front of players)
-    this._drawDecos(solidDecos, cx, cy, vw, vh);
+      const grp = this._remoteGroups[id];
 
-    // Draw local player on top
-    this._drawPlayer(
-      localPlayer.x, localPlayer.y,
-      localPlayer.colour, localPlayer.name,
-      PLAYER_R, true
-    );
-    this._drawBubble(ctx, 'local', localPlayer.x, localPlayer.y - PLAYER_R);
+      // Position & facing
+      grp.position.set(p.x ?? 0, p.y ?? 0, p.z ?? 0);
+      grp.rotation.y = p.rotationY ?? 0;
 
-    ctx.restore();
-
-    // ── Minimap ──
-    if (this.miniCtx) this._drawMinimap(localPlayer, remotePlayers);
-
-    // Expire old bubbles
-    this._pruneBubbles(timestamp);
-  }
-
-  // ── Draw tiles (only tiles visible in viewport) ────────────
-  _drawTiles(cx, cy, vw, vh, timestamp) {
-    const ctx = this.ctx;
-
-    const startX = Math.max(0, Math.floor(cx / TILE_SIZE));
-    const startY = Math.max(0, Math.floor(cy / TILE_SIZE));
-    const endX   = Math.min(WORLD_W - 1, Math.ceil((cx + vw)  / TILE_SIZE));
-    const endY   = Math.min(WORLD_H - 1, Math.ceil((cy + vh) / TILE_SIZE));
-
-    for (let ty = startY; ty <= endY; ty++) {
-      for (let tx = startX; tx <= endX; tx++) {
-        const tile = tileMap[ty][tx];
-        const def  = TILE_DEF[tile];
-        const px   = tx * TILE_SIZE;
-        const py   = ty * TILE_SIZE;
-
-        // Checkerboard variation for visual interest
-        const alt = (tx + ty) % 2 === 0;
-
-        if (tile === TILE.WATER) {
-          // Animated water shimmer
-          const wave = Math.sin(timestamp * 0.001 + tx * 0.5 + ty * 0.3);
-          const blue = alt ? '#1a5fa8' : '#1b6dbf';
-          ctx.fillStyle = blue;
-          ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
-
-          // Shimmer highlight
-          ctx.fillStyle = `rgba(255,255,255,${0.04 + 0.03 * wave})`;
-          ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
-        } else {
-          ctx.fillStyle = alt ? def.base : def.alt;
-          ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
-        }
+      // Walk animation — swing arms & legs
+      // children: [0]head [1]torso [2]lArm [3]rArm [4]lLeg [5]rLeg
+      if (grp.children.length === 6) {
+        const swing = Math.sin(t) * 0.40;
+        grp.children[2].rotation.x =  swing;   // lArm
+        grp.children[3].rotation.x = -swing;   // rArm
+        grp.children[4].rotation.x = -swing;   // lLeg
+        grp.children[5].rotation.x =  swing;   // rLeg
       }
     }
   }
 
-  // ── Draw a list of decorations (culled to viewport) ────────
-  _drawDecos(list, cx, cy, vw, vh) {
-    const ctx    = this.ctx;
-    const margin = TILE_SIZE * 3;
+  // ── 2-D overlay: name tags + chat bubbles ─────────────────
+  _drawOverlay(remotePlayers) {
+    const ctx = this._overlayCtx;
+    const W   = this._overlay.width;
+    const H   = this._overlay.height;
 
-    for (const d of list) {
-      const wx = d.x * TILE_SIZE;
-      const wy = d.y * TILE_SIZE;
+    ctx.clearRect(0, 0, W, H);
 
-      // Cull offscreen
-      if (wx < cx - margin || wx > cx + vw + margin) continue;
-      if (wy < cy - margin || wy > cy + vh + margin) continue;
+    for (const [id, p] of Object.entries(remotePlayers)) {
+      // World-space point just above the character's head
+      const worldPos = new THREE.Vector3(
+        p.x ?? 0,
+        (p.y ?? 0) + 2.3,
+        p.z ?? 0
+      );
+      worldPos.project(camera);
 
-      // Centre of the tile
-      const mx = wx + TILE_SIZE / 2;
-      const my = wy + TILE_SIZE / 2;
+      // Skip if behind camera or far off-screen
+      if (worldPos.z > 1) continue;
+      const sx = (worldPos.x *  0.5 + 0.5) * W;
+      const sy = (worldPos.y * -0.5 + 0.5) * H;
+      if (sx < -80 || sx > W + 80 || sy < -80 || sy > H + 80) continue;
 
-      switch (d.type) {
-        case DECO.TREE:     this._drawTree(ctx, mx, my);    break;
-        case DECO.BUSH:     this._drawBush(ctx, mx, my);    break;
-        case DECO.ROCK:     this._drawRock(ctx, mx, my);    break;
-        case DECO.FLOWER:   this._drawFlower(ctx, mx, my, d.colour); break;
-        case DECO.MUSHROOM: this._drawMushroom(ctx, mx, my); break;
-        case DECO.SIGN:     this._drawSign(ctx, mx, my);    break;
-      }
-    }
-  }
-
-  // ── Individual decoration drawers ──────────────────────────
-
-  _drawTree(ctx, x, y) {
-    // Shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.18)';
-    ctx.beginPath();
-    ctx.ellipse(x + 2, y + 6, 12, 5, 0, 0, Math.PI * 2);
-    ctx.fill();
-    // Trunk
-    ctx.fillStyle = '#5c3d1e';
-    ctx.fillRect(x - 4, y - 2, 8, 14);
-    // Canopy (dark outer + lighter inner for pixel depth)
-    ctx.fillStyle = '#1e5c17';
-    ctx.beginPath();
-    ctx.arc(x, y - 8, 16, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#2d8020';
-    ctx.beginPath();
-    ctx.arc(x - 3, y - 11, 10, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#3a9c2b';
-    ctx.beginPath();
-    ctx.arc(x - 4, y - 13, 6, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  _drawBush(ctx, x, y) {
-    ctx.fillStyle = 'rgba(0,0,0,0.12)';
-    ctx.beginPath();
-    ctx.ellipse(x + 1, y + 4, 9, 4, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#2d6b22';
-    ctx.beginPath();
-    ctx.arc(x, y, 9, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#38882c';
-    ctx.beginPath();
-    ctx.arc(x - 3, y - 3, 6, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  _drawRock(ctx, x, y) {
-    ctx.fillStyle = 'rgba(0,0,0,0.15)';
-    ctx.beginPath();
-    ctx.ellipse(x + 2, y + 6, 9, 4, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#6a6a7a';
-    ctx.beginPath();
-    ctx.ellipse(x, y, 9, 7, -0.3, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#8a8a9a';
-    ctx.beginPath();
-    ctx.ellipse(x - 2, y - 2, 5, 4, -0.3, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  _drawFlower(ctx, x, y, colour = '#ff6b9d') {
-    // Stem
-    ctx.strokeStyle = '#4a8c3a';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(x, y + 2);
-    ctx.lineTo(x, y + 7);
-    ctx.stroke();
-    // Petals
-    ctx.fillStyle = colour;
-    for (let i = 0; i < 5; i++) {
-      const a = (i / 5) * Math.PI * 2;
-      ctx.beginPath();
-      ctx.arc(x + Math.cos(a) * 3.5, y + Math.sin(a) * 3.5, 2.5, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    // Centre
-    ctx.fillStyle = '#ffdd57';
-    ctx.beginPath();
-    ctx.arc(x, y, 2.5, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  _drawMushroom(ctx, x, y) {
-    // Stalk
-    ctx.fillStyle = '#e8d8b0';
-    ctx.fillRect(x - 3, y, 6, 7);
-    // Cap
-    ctx.fillStyle = '#c0392b';
-    ctx.beginPath();
-    ctx.arc(x, y, 8, Math.PI, 0);
-    ctx.fill();
-    // Spots
-    ctx.fillStyle = 'rgba(255,255,255,0.7)';
-    ctx.beginPath(); ctx.arc(x - 2, y - 3, 2, 0, Math.PI*2); ctx.fill();
-    ctx.beginPath(); ctx.arc(x + 3, y - 1, 1.5, 0, Math.PI*2); ctx.fill();
-  }
-
-  _drawSign(ctx, x, y) {
-    // Post
-    ctx.fillStyle = '#7a5428';
-    ctx.fillRect(x - 2, y - 4, 4, 16);
-    // Board
-    ctx.fillStyle = '#a06c38';
-    ctx.strokeStyle = '#7a5428';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.roundRect(x - 12, y - 18, 24, 14, 2);
-    ctx.fill();
-    ctx.stroke();
-    // "!" text on sign
-    ctx.fillStyle = '#3d1c00';
-    ctx.font = 'bold 10px monospace';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('!', x, y - 11);
-    ctx.textAlign = 'left';
-  }
-
-  // ── Draw a player (local or remote) ───────────────────────
-  _drawPlayer(x, y, colour, name, radius, isLocal) {
-    const ctx = this.ctx;
-
-    // Shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.25)';
-    ctx.beginPath();
-    ctx.ellipse(x + 2, y + radius - 2, radius * 0.8, radius * 0.3, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Body circle
-    ctx.fillStyle = colour;
-    ctx.beginPath();
-    ctx.arc(x, y, radius, 0, Math.PI * 2);
-    ctx.fill();
-
-    // White outline (thicker for local player)
-    ctx.strokeStyle = isLocal ? '#ffffff' : 'rgba(255,255,255,0.7)';
-    ctx.lineWidth   = isLocal ? 2.5 : 1.5;
-    ctx.stroke();
-
-    // Local player indicator ring
-    if (isLocal) {
-      ctx.strokeStyle = 'rgba(255,255,255,0.3)';
-      ctx.lineWidth   = 1;
-      ctx.beginPath();
-      ctx.arc(x, y, radius + 4, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-
-    // Eyes
-    const eyeY  = y - radius * 0.2;
-    const eyeOff = radius * 0.3;
-    ctx.fillStyle = 'rgba(0,0,0,0.6)';
-    ctx.beginPath();
-    ctx.arc(x - eyeOff, eyeY, 2.5, 0, Math.PI * 2);
-    ctx.arc(x + eyeOff, eyeY, 2.5, 0, Math.PI * 2);
-    ctx.fill();
-    // Eye shine
-    ctx.fillStyle = 'rgba(255,255,255,0.8)';
-    ctx.beginPath();
-    ctx.arc(x - eyeOff + 1, eyeY - 1, 1, 0, Math.PI * 2);
-    ctx.arc(x + eyeOff + 1, eyeY - 1, 1, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Name tag above player
-    if (name) {
-      const tagY = y - radius - 14;
-      ctx.font         = NAME_FONT;
+      // ── Name tag ──────────────────────────────────────────
+      const name = p.name || 'Player';
+      ctx.font         = '9px "Press Start 2P", monospace';
       ctx.textAlign    = 'center';
       ctx.textBaseline = 'middle';
 
-      // Measure for background
-      const tw = ctx.measureText(name).width;
-      const th = 10;
-      const pad = 4;
+      const tw  = ctx.measureText(name).width;
+      const pad = 5;
+      const bw  = tw + pad * 2;
+      const bh  = 18;
 
-      // Tag background
-      ctx.fillStyle = 'rgba(13,13,26,0.75)';
+      // Background pill
+      ctx.fillStyle = 'rgba(13,13,26,0.80)';
       ctx.beginPath();
-      ctx.roundRect(x - tw/2 - pad, tagY - th/2 - pad, tw + pad*2, th + pad*2, 3);
+      ctx.roundRect(sx - bw / 2, sy - bh / 2, bw, bh, 4);
       ctx.fill();
 
-      // Tag border (player colour)
-      ctx.strokeStyle = colour;
+      // Coloured border
+      ctx.strokeStyle = p.colour || '#ffffff';
       ctx.lineWidth   = 1;
       ctx.stroke();
 
-      // Name text
       ctx.fillStyle = '#ffffff';
-      ctx.fillText(name, x, tagY);
+      ctx.fillText(name, sx, sy);
+
+      // ── Chat bubble ───────────────────────────────────────
+      const bubble = this._bubbles[id];
+      if (bubble && performance.now() < bubble.expires) {
+        const fade   = Math.min(1, (bubble.expires - performance.now()) / 500);
+        const bubbleY = sy - bh - 10;
+
+        ctx.save();
+        ctx.globalAlpha = fade;
+        ctx.font        = '15px "VT323", monospace';
+        ctx.textAlign   = 'center';
+        ctx.textBaseline = 'middle';
+
+        const btw = ctx.measureText(bubble.text).width;
+        const bp  = 8;
+        const bbw = btw + bp * 2;
+        const bbh = 22;
+
+        // Bubble background
+        ctx.fillStyle = 'rgba(255,255,255,0.92)';
+        ctx.beginPath();
+        ctx.roundRect(sx - bbw / 2, bubbleY - bbh / 2, bbw, bbh, 6);
+        ctx.fill();
+
+        // Tail
+        ctx.beginPath();
+        ctx.moveTo(sx - 5, bubbleY + bbh / 2);
+        ctx.lineTo(sx,     bubbleY + bbh / 2 + 7);
+        ctx.lineTo(sx + 5, bubbleY + bbh / 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#111';
+        ctx.fillText(bubble.text, sx, bubbleY);
+        ctx.restore();
+      }
     }
 
     ctx.textAlign    = 'left';
     ctx.textBaseline = 'alphabetic';
   }
 
-  // ── Draw a chat bubble above a player ─────────────────────
-  _drawBubble(ctx, id, x, topY) {
-    const b = this._bubbles[id];
-    if (!b || performance.now() > b.expires) return;
+  // ── Minimap: bake static zone-colour background ───────────
+  _bakeMinimap() {
+    const bg   = document.createElement('canvas');
+    bg.width   = MINIMAP_SIZE;
+    bg.height  = MINIMAP_SIZE;
+    const bctx = bg.getContext('2d');
+    const S    = MINIMAP_SIZE / MINIMAP_RES;
 
-    const age    = performance.now() - (b.expires - 4000);
-    const fade   = Math.min(1, (4000 - (performance.now() - (b.expires - 4000))) / 500);
-    const bubbleY = topY - 24;
-
-    ctx.save();
-    ctx.globalAlpha = fade;
-    ctx.font         = BUBBLE_FONT;
-    ctx.textAlign    = 'center';
-    ctx.textBaseline = 'middle';
-
-    const tw  = ctx.measureText(b.text).width;
-    const pad = 8;
-    const bw  = tw + pad * 2;
-    const bh  = 22;
-    const bx  = x - bw / 2;
-    const by  = bubbleY - bh / 2;
-
-    // Bubble background
-    ctx.fillStyle = 'rgba(255,255,255,0.92)';
-    ctx.beginPath();
-    ctx.roundRect(bx, by, bw, bh, 6);
-    ctx.fill();
-
-    // Bubble tail
-    ctx.beginPath();
-    ctx.moveTo(x - 5, by + bh);
-    ctx.lineTo(x,     by + bh + 8);
-    ctx.lineTo(x + 5, by + bh);
-    ctx.fill();
-
-    // Text
-    ctx.fillStyle = '#111';
-    ctx.fillText(b.text, x, bubbleY);
-
-    ctx.restore();
-  }
-
-  // ── Draw minimap ───────────────────────────────────────────
-  _drawMinimap(localPlayer, remotePlayers) {
-    const ctx = this.miniCtx;
-    const mw  = this.miniW;
-    const mh  = this.miniH;
-    const scX = mw / (WORLD_W * TILE_SIZE);
-    const scY = mh / (WORLD_H * TILE_SIZE);
-
-    // Draw cached tile overview once (expensive, only build first frame)
-    if (!_minimapCache) {
-      const offCanvas = new OffscreenCanvas(mw, mh);
-      const offCtx    = offCanvas.getContext('2d');
-
-      for (let ty = 0; ty < WORLD_H; ty++) {
-        for (let tx = 0; tx < WORLD_W; tx++) {
-          offCtx.fillStyle = TILE_DEF[tileMap[ty][tx]].base;
-          offCtx.fillRect(
-            tx * mw / WORLD_W,
-            ty * mh / WORLD_H,
-            Math.ceil(mw / WORLD_W),
-            Math.ceil(mh / WORLD_H)
-          );
-        }
-      }
-
-      // Trees on minimap
-      offCtx.fillStyle = '#1e5c17';
-      for (const d of decorations) {
-        if (d.type !== DECO.TREE) continue;
-        offCtx.fillRect(
-          d.x * mw / WORLD_W, d.y * mh / WORLD_H, 2, 2
+    for (let iy = 0; iy < MINIMAP_RES; iy++) {
+      for (let ix = 0; ix < MINIMAP_RES; ix++) {
+        const wx = -HALF + (ix / MINIMAP_RES) * WORLD_SIZE;
+        const wz = -HALF + (iy / MINIMAP_RES) * WORLD_SIZE;
+        bctx.fillStyle = ZONE_COLOR[getZoneName(wx, wz)] || '#204010';
+        bctx.fillRect(
+          ix * S, iy * S,
+          Math.ceil(S) + 1, Math.ceil(S) + 1
         );
       }
-
-      _minimapCache = offCanvas.transferToImageBitmap();
     }
+    return bg;
+  }
 
-    ctx.clearRect(0, 0, mw, mh);
-    ctx.drawImage(_minimapCache, 0, 0);
+  // ── Minimap: draw live frame ──────────────────────────────
+  _drawMinimap(localPlayer, remotePlayers) {
+    const ctx  = this._miniCtx;
+    const size = MINIMAP_SIZE;
+    const half = size / 2;
 
-    // Viewport rectangle
-    const vx = (this.camX / WORLD_PX) * mw;
-    const vy = (this.camY / WORLD_PY) * mh;
-    const vw = (this.canvas.width  / WORLD_PX) * mw;
-    const vh = (this.canvas.height / WORLD_PY) * mh;
-    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-    ctx.lineWidth   = 1;
-    ctx.strokeRect(vx, vy, vw, vh);
+    ctx.clearRect(0, 0, size, size);
 
-    // Remote players
+    // Circular clip
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(half, half, half, 0, Math.PI * 2);
+    ctx.clip();
+
+    // Baked background
+    if (this._minimapBg) ctx.drawImage(this._minimapBg, 0, 0);
+
+    // Helper: world → minimap pixel
+    const toMX = wx => ((wx + HALF) / WORLD_SIZE) * size;
+    const toMY = wz => ((wz + HALF) / WORLD_SIZE) * size;
+
+    // Remote players — coloured dots
     for (const p of Object.values(remotePlayers)) {
-      ctx.fillStyle = p.colour;
+      const mx = toMX(p.x ?? 0);
+      const my = toMY(p.z ?? 0);
+      ctx.fillStyle = p.colour || '#ffffff';
       ctx.beginPath();
-      ctx.arc(p.x * scX, p.y * scY, 2.5, 0, Math.PI * 2);
+      ctx.arc(mx, my, 2.5, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    // Local player (bright white dot)
+    // Local player — white dot + direction triangle
+    const lpx = toMX(localPlayer.x);
+    const lpy = toMY(localPlayer.z);
+
     ctx.fillStyle   = '#ffffff';
-    ctx.strokeStyle = localPlayer.colour;
+    ctx.strokeStyle = localPlayer.colour || '#00f5c4';
     ctx.lineWidth   = 1.5;
     ctx.beginPath();
-    ctx.arc(localPlayer.x * scX, localPlayer.y * scY, 3.5, 0, Math.PI * 2);
+    ctx.arc(lpx, lpy, 4, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
+
+    // Direction arrow (rotated by yaw)
+    ctx.save();
+    ctx.translate(lpx, lpy);
+    // Three.js yaw = 0 → looking down -Z (north on minimap).
+    // Minimap +Y = +Z world, so arrow pointing "up minimap" = -Z world = yaw 0.
+    ctx.rotate(localPlayer.yaw + Math.PI);
+    ctx.fillStyle = '#00f5c4';
+    ctx.beginPath();
+    ctx.moveTo(0, -8);
+    ctx.lineTo(-3, 0);
+    ctx.lineTo(3, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    ctx.restore(); // remove circular clip
   }
 
-  // ── Prune expired bubbles ──────────────────────────────────
-  _pruneBubbles(now) {
-    for (const id in this._bubbles) {
-      if (now > this._bubbles[id].expires) delete this._bubbles[id];
-    }
+  // ── Internal helpers ──────────────────────────────────────
+  _resizeOverlay() {
+    this._overlay.width  = window.innerWidth;
+    this._overlay.height = window.innerHeight;
   }
+}
 
-  // ── Resize canvas to fill window ──────────────────────────
-  _resizeCanvas() {
-    this.canvas.width  = window.innerWidth;
-    this.canvas.height = window.innerHeight;
-    // Invalidate minimap cache on resize (viewport rect changes)
-    // (tile cache stays valid — only viewport box needs redraw)
-  }
+// ── Standalone helper: create a positioned canvas element ──
+function _mkCanvas(cssText) {
+  const c = document.createElement('canvas');
+  c.style.cssText = cssText;
+  return c;
 }
