@@ -64,6 +64,14 @@ export function updatePosition(x, y, z, rotationY) {
   });
 }
 
+export function updateCharacter(charConfig) {
+  if (!_playerRef || !isConfigured) return;
+  update(_playerRef, {
+    colour:     charConfig.shirtColour || '#1e90ff',
+    charConfig: JSON.stringify(charConfig),
+  });
+}
+
 export function onPlayersUpdate(callback) {
   if (!isConfigured) { callback({}); return () => {}; }
 
@@ -76,6 +84,7 @@ export function onPlayersUpdate(callback) {
       others[id] = {
         name:      data.name      || 'Player',
         colour:    data.colour    || '#ffffff',
+        charConfig: data.charConfig ? JSON.parse(data.charConfig) : null,
         x:         data.x         ?? 0,
         y:         data.y         ?? 0,
         z:         data.z         ?? 0,
