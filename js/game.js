@@ -735,10 +735,16 @@ function setupPointerLock() {
     if (!isPointerLocked()) requestPointerLock(gameCanvas);
   });
 
-  // pointerlockchange: nothing special needed — no overlay to show/hide
+  // pointerlockchange: open the pause menu whenever the browser releases
+  // pointer lock.  Chrome intercepts the FIRST ESC to show its
+  // "press and hold ESC to exit" notification (consuming that keydown),
+  // so the keydown handler alone requires two ESC presses.  Hooking
+  // pointerlockchange means we react the instant the lock drops —
+  // regardless of whether Chrome swallowed the keydown or not.
   document.addEventListener('pointerlockchange', () => {
-    // If pointer lock is lost outside of chat/map/pause, it just means the
-    // user pressed ESC; the keydown handler will open the pause menu.
+    if (!isPointerLocked() && !isChatOpen && !isMapOpen && !isPauseOpen) {
+      openPauseMenu();
+    }
   });
 
   document.addEventListener('pointerlockerror', () => {
