@@ -970,8 +970,16 @@ function closePauseMenu() {
   isPauseOpen = false;
   pauseMenu?.classList.add('hidden');
   btnSettings?.classList.remove('active');
-  // Re-acquire pointer lock automatically
-  requestPointerLock(gameCanvas);
+  // Re-acquire pointer lock automatically.
+  // We use a short timeout because browsers block requestPointerLock()
+  // when it's called in the same event tick that ESC released the lock.
+  // Giving the browser one frame to clear that block makes it reliable.
+  gameCanvas.focus();
+  setTimeout(() => {
+    if (!isPauseOpen && !isChatOpen && !isMapOpen) {
+      requestPointerLock(gameCanvas);
+    }
+  }, 80);
 }
 
 // ============================================================
