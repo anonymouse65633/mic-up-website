@@ -23,6 +23,7 @@ import {
   joinGame,
   leaveGame,
   updatePosition,
+  updateCharacter,
   onPlayersUpdate,
   getPlayerCount,
   sendChat,
@@ -1063,7 +1064,7 @@ function initAvatarPreview() {
     });
   }
 
-  // Avatar reset
+  // ── Avatar Reset ─────────────────────────────────────────
   document.getElementById('pmAvatarReset')?.addEventListener('click', () => {
     saveLocalCharConfig({ ...DEFAULT_CHAR_CONFIG });
     _syncAvSwatches();
@@ -1072,6 +1073,14 @@ function initAvatarPreview() {
     if (hSl) hSl.value = DEFAULT_CHAR_CONFIG.height;
     if (hV)  hV.textContent = DEFAULT_CHAR_CONFIG.height.toFixed(2) + '×';
     _rebuildAvPreview();
+    _flashApplyBtn('Reset!');
+  });
+
+  // ── Apply Avatar ──────────────────────────────────────────
+  document.getElementById('pmApplyAvatar')?.addEventListener('click', () => {
+    const cfg = getLocalCharConfig();
+    updateCharacter(cfg);
+    _flashApplyBtn('Applied ✓');
   });
 
   _rebuildAvPreview();
@@ -1136,6 +1145,18 @@ function _rebuildAvPreview() {
   _avPrevGroup = buildCharacter(getLocalCharConfig());
   _avPrevScene.add(_avPrevGroup);
   _renderAvPreview();
+}
+
+function _flashApplyBtn(label) {
+  const btn = document.getElementById('pmApplyAvatar');
+  if (!btn) return;
+  const orig = btn.textContent;
+  btn.textContent = label;
+  btn.disabled = true;
+  setTimeout(() => {
+    btn.textContent = 'Apply';
+    btn.disabled = false;
+  }, 1400);
 }
 
 function _renderAvPreview() {
