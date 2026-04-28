@@ -137,104 +137,159 @@
     </div><!-- /.hud-bl -->
 
     <!-- ══════════════════════════════════════════════════
-         SETTINGS PANEL
-         Centred modal — toggled by #btnSettings or ESC.
-         game.js reads/writes all values here.
-
-         Sensitivity range:
-           min  0.0005  (very slow, sniper-scope feel)
-           max  0.0080  (fast, competitive feel)
-           step 0.0001
-           default 0.0022
-
-         Key-bind buttons carry [data-bind="<action>"].
-         game.js sets their text to the human-readable key
-         name and adds .sp-listening while waiting for input.
+         PAUSE MENU  (Roblox-style)
+         Opens / closes with ESC or the ⚙ HUD button.
+         Left sidebar: Settings | Avatar | Resume | Leave
+         Right content: tab panels for each section.
          ══════════════════════════════════════════════════ -->
-    <div id="settingsPanel" class="hidden" role="dialog" aria-modal="true" aria-label="Settings">
+    <div id="pauseMenu" class="pm-overlay hidden" role="dialog" aria-modal="true" aria-label="Pause menu">
+      <div class="pm-panel">
 
-      <div class="sp-header">
-        <span class="sp-title">SETTINGS</span>
-        <button id="spClose" class="sp-close" aria-label="Close settings">✕</button>
-      </div>
+        <!-- ── Left navigation sidebar ── -->
+        <nav class="pm-nav" aria-label="Menu sections">
+          <div class="pm-brand">WALKWORLD</div>
 
-      <div class="sp-body">
+          <button class="pm-nav-btn pm-nav-active" data-pm-tab="settings" aria-selected="true">
+            <span class="pm-nav-icon">⚙</span> Settings
+          </button>
+          <button class="pm-nav-btn" data-pm-tab="avatar" aria-selected="false">
+            <span class="pm-nav-icon">👤</span> Avatar
+          </button>
 
-        <!-- ── Mouse sensitivity ── -->
-        <div class="sp-section">
-          <p class="sp-section-title">MOUSE SENSITIVITY</p>
-          <div class="sp-sens-row">
-            <label for="spSensSlider">Sensitivity</label>
-            <input
-              id="spSensSlider"
-              class="sp-slider"
-              type="range"
-              min="0.0005"
-              max="0.0080"
-              step="0.0001"
-              value="0.0022"
-              aria-label="Mouse sensitivity"
-            />
-            <span id="spSensVal" class="sp-sens-val">0.0022</span>
-          </div>
-        </div>
+          <div class="pm-nav-spacer" aria-hidden="true"></div>
 
-        <!-- ── Key binds ── -->
-        <div class="sp-section">
-          <p class="sp-section-title">KEY BINDS</p>
+          <button id="pmResume" class="pm-nav-btn pm-nav-resume" aria-label="Resume game">
+            <span class="pm-nav-icon">▶</span> Resume
+          </button>
+          <button id="pmLeave" class="pm-nav-btn pm-nav-leave" aria-label="Leave to lobby">
+            <span class="pm-nav-icon">🚪</span> Leave Game
+          </button>
+        </nav>
 
-          <!-- forward -->
-          <div class="sp-bind-row">
-            <span class="sp-bind-label">Forward</span>
-            <button class="sp-bind-btn" data-bind="forward" aria-label="Rebind forward">W</button>
-          </div>
+        <!-- ── Right content panel ── -->
+        <div class="pm-content">
 
-          <!-- back -->
-          <div class="sp-bind-row">
-            <span class="sp-bind-label">Back</span>
-            <button class="sp-bind-btn" data-bind="back" aria-label="Rebind back">S</button>
-          </div>
+          <!-- ════ SETTINGS TAB ════ -->
+          <div class="pm-tab" id="pmTabSettings" role="tabpanel">
+            <p class="pm-tab-title">SETTINGS</p>
 
-          <!-- left -->
-          <div class="sp-bind-row">
-            <span class="sp-bind-label">Left</span>
-            <button class="sp-bind-btn" data-bind="left" aria-label="Rebind left">A</button>
-          </div>
+            <!-- Mouse sensitivity -->
+            <div class="sp-section">
+              <p class="sp-section-title">MOUSE SENSITIVITY</p>
+              <div class="sp-sens-row">
+                <label for="spSensSlider">Sensitivity</label>
+                <input
+                  id="spSensSlider"
+                  class="sp-slider"
+                  type="range"
+                  min="0.0005"
+                  max="0.0080"
+                  step="0.0001"
+                  value="0.0022"
+                  aria-label="Mouse sensitivity"
+                />
+                <span id="spSensVal" class="sp-sens-val">0.0022</span>
+              </div>
+            </div>
 
-          <!-- right -->
-          <div class="sp-bind-row">
-            <span class="sp-bind-label">Right</span>
-            <button class="sp-bind-btn" data-bind="right" aria-label="Rebind right">D</button>
-          </div>
+            <!-- Key binds -->
+            <div class="sp-section">
+              <p class="sp-section-title">KEY BINDS</p>
+              <div class="sp-bind-row">
+                <span class="sp-bind-label">Forward</span>
+                <button class="sp-bind-btn" data-bind="forward">W</button>
+              </div>
+              <div class="sp-bind-row">
+                <span class="sp-bind-label">Back</span>
+                <button class="sp-bind-btn" data-bind="back">S</button>
+              </div>
+              <div class="sp-bind-row">
+                <span class="sp-bind-label">Left</span>
+                <button class="sp-bind-btn" data-bind="left">A</button>
+              </div>
+              <div class="sp-bind-row">
+                <span class="sp-bind-label">Right</span>
+                <button class="sp-bind-btn" data-bind="right">D</button>
+              </div>
+              <div class="sp-bind-row">
+                <span class="sp-bind-label">Jump</span>
+                <button class="sp-bind-btn" data-bind="jump">Space</button>
+              </div>
+              <div class="sp-bind-row">
+                <span class="sp-bind-label">Sprint</span>
+                <button class="sp-bind-btn" data-bind="sprint">Shift</button>
+              </div>
+              <div class="sp-bind-row">
+                <span class="sp-bind-label">Chat</span>
+                <button class="sp-bind-btn" data-bind="chat">T</button>
+              </div>
+            </div>
 
-          <!-- jump -->
-          <div class="sp-bind-row">
-            <span class="sp-bind-label">Jump</span>
-            <button class="sp-bind-btn" data-bind="jump" aria-label="Rebind jump">Space</button>
-          </div>
+            <div class="sp-reset-row">
+              <button id="spReset" class="sp-reset-btn">Reset Defaults</button>
+            </div>
+          </div><!-- /#pmTabSettings -->
 
-          <!-- sprint -->
-          <div class="sp-bind-row">
-            <span class="sp-bind-label">Sprint</span>
-            <button class="sp-bind-btn" data-bind="sprint" aria-label="Rebind sprint">Shift</button>
-          </div>
+          <!-- ════ AVATAR TAB ════ -->
+          <div class="pm-tab pm-hidden" id="pmTabAvatar" role="tabpanel">
+            <p class="pm-tab-title">AVATAR</p>
 
-          <!-- chat -->
-          <div class="sp-bind-row">
-            <span class="sp-bind-label">Chat</span>
-            <button class="sp-bind-btn" data-bind="chat" aria-label="Rebind chat">T</button>
-          </div>
+            <div class="pm-avatar-wrap">
 
-        </div><!-- /.sp-section key binds -->
+              <!-- Mini 3-D preview -->
+              <div class="pm-avatar-preview">
+                <canvas id="pmPreviewCanvas" width="110" height="160"></canvas>
+              </div>
 
-        <!-- ── Reset ── -->
-        <div class="sp-reset-row">
-          <button id="spReset" class="sp-reset-btn">Reset Defaults</button>
-        </div>
+              <!-- Controls -->
+              <div class="pm-avatar-controls">
 
-      </div><!-- /.sp-body -->
+                <div class="pm-av-section">
+                  <p class="pm-av-label">SKIN</p>
+                  <div class="pm-av-swatches" id="pmSwatchSkin"></div>
+                </div>
 
-    </div><!-- /#settingsPanel -->
+                <div class="pm-av-section">
+                  <p class="pm-av-label">SHIRT</p>
+                  <div class="pm-av-swatches" id="pmSwatchShirt"></div>
+                </div>
+
+                <div class="pm-av-section">
+                  <p class="pm-av-label">PANTS</p>
+                  <div class="pm-av-swatches" id="pmSwatchPants"></div>
+                </div>
+
+                <div class="pm-av-section">
+                  <p class="pm-av-label">HAIR STYLE</p>
+                  <div class="pm-av-hair-row" id="pmHairBtns"></div>
+                </div>
+
+                <div class="pm-av-section">
+                  <p class="pm-av-label">HAIR COLOUR</p>
+                  <div class="pm-av-swatches" id="pmSwatchHair"></div>
+                </div>
+
+                <div class="pm-av-section">
+                  <p class="pm-av-label">HEIGHT &nbsp;<span id="pmHeightVal">1.00×</span></p>
+                  <div class="sp-sens-row">
+                    <span style="font-size:13px;color:var(--c-muted)">Short</span>
+                    <input id="pmHeightSlider" class="sp-slider" type="range"
+                           min="0.70" max="1.40" step="0.01" value="1.00" />
+                    <span style="font-size:13px;color:var(--c-muted)">Tall</span>
+                  </div>
+                </div>
+
+              </div><!-- /.pm-avatar-controls -->
+            </div><!-- /.pm-avatar-wrap -->
+
+            <div class="sp-reset-row">
+              <button id="pmAvatarReset" class="sp-reset-btn">Reset Avatar</button>
+            </div>
+          </div><!-- /#pmTabAvatar -->
+
+        </div><!-- /.pm-content -->
+      </div><!-- /.pm-panel -->
+    </div><!-- /#pauseMenu -->
 
     <!-- ══════════════════════════════════════════════════
          CHAT
