@@ -8,7 +8,365 @@
   <link rel="stylesheet" href="css/game.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323:wght@400&display=swap" rel="stylesheet" />
+</head><!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WalkWorld 3D — Playing</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/game.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323:wght@400&display=swap" rel="stylesheet" />
 </head>
+<body class="game-page">
+
+  <!-- ══════════════════════════════════════════════════════
+       LOADING OVERLAY
+       ══════════════════════════════════════════════════════ -->
+  <div id="loadingOverlay" class="overlay loading-overlay" aria-live="polite">
+    <div class="loading-box">
+      <div class="load-icon">🌍</div>
+      <p class="load-title">Loading World…</p>
+      <div class="load-bar-wrap">
+        <div class="load-bar" id="loadBar"></div>
+      </div>
+      <p class="load-status" id="loadStatus">Connecting…</p>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       DISCONNECTED OVERLAY
+       ══════════════════════════════════════════════════════ -->
+  <div id="disconnectedOverlay" class="overlay disc-overlay hidden">
+    <div class="disc-box">
+      <p class="disc-icon">⚠️</p>
+      <p class="disc-title">Disconnected</p>
+      <p class="disc-msg">Lost connection to server.</p>
+      <button class="disc-btn" onclick="window.location.reload()">RECONNECT</button>
+      <a class="disc-back" href="index.html">← Back to lobby</a>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       POINTER-LOCK OVERLAY
+       ══════════════════════════════════════════════════════ -->
+  <div id="lockOverlay" class="lock-overlay hidden">
+    <div class="lock-box">
+      <p class="lock-icon">🖱️</p>
+      <p class="lock-title">Click to Play</p>
+      <p class="lock-sub">Mouse will be captured · ESC to release</p>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════
+       GAME WRAPPER  (hidden until world finishes loading)
+       ══════════════════════════════════════════════════════ -->
+  <div id="gameWrapper" class="game-wrapper hidden">
+
+    <!-- ── 3-D canvas ── -->
+    <canvas id="gameCanvas" aria-label="3D game world"></canvas>
+
+    <!-- ── Crosshair ── -->
+    <div class="crosshair" aria-hidden="true">
+      <div class="ch-h"></div>
+      <div class="ch-v"></div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════
+         CoD-STYLE COMPASS BAR  (top centre)
+         .compass-bar-wrap clips to 320 px and fades edges.
+         #compassCanvas is wider (600 px) so game.js can
+         scroll the degree strip behind the fixed notch.
+         ══════════════════════════════════════════════════ -->
+    <div class="compass-bar-wrap" aria-hidden="true">
+      <canvas id="compassCanvas" width="600" height="32"></canvas>
+      <div class="compass-notch"></div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════
+         HUD — top-left  (player name / pos / zone)
+         ══════════════════════════════════════════════════ -->
+    <div class="hud hud-tl" id="hudPlayer">
+      <div class="hud-avatar" id="hudAvatar"></div>
+      <div class="hud-info">
+        <span class="hud-name" id="hudName">—</span>
+        <span class="hud-pos"  id="hudPos">0, 0, 0</span>
+        <span class="hud-zone" id="hudZone">Plains</span>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════
+         HUD — top-right  (online count)
+         Sits above the minimap that renderer.js places at
+         top: 70 px, right: 14 px.
+         ══════════════════════════════════════════════════ -->
+    <div class="hud hud-tr" id="hudOnline">
+      <span class="dot-pulse"></span>
+      <span id="hudCount">0</span>&nbsp;online
+    </div>
+
+    <!-- ══════════════════════════════════════════════════
+         HUD — bottom-left
+         Old round compass kept in DOM (hidden via CSS) so
+         compassDir stays available as a game.js fallback.
+         Icon row is pointer-interactive (settings / char).
+         ══════════════════════════════════════════════════ -->
+    <div class="hud-bl">
+
+      <!-- Legacy round compass — hidden by game.css, kept
+           so game.js compassDir fallback still works -->
+      <div class="compass" id="compass" aria-hidden="true">
+        <span class="compass-dir" id="compassDir">N</span>
+      </div>
+
+      <!-- Controls hint -->
+      <div class="controls-hint" aria-label="Controls">
+        WASD&nbsp;·&nbsp;Move &nbsp;|&nbsp;
+        Mouse&nbsp;·&nbsp;Look &nbsp;|&nbsp;
+        Space&nbsp;·&nbsp;Jump &nbsp;|&nbsp;
+        T&nbsp;·&nbsp;Chat &nbsp;|&nbsp;
+        M&nbsp;·&nbsp;Map
+      </div>
+
+      <!-- Icon buttons (settings + character editor) -->
+      <div class="hud-icon-row">
+        <button
+          id="btnSettings"
+          class="hud-icon-btn"
+          title="Settings  (opens/closes with ESC)"
+          aria-label="Open settings"
+        >⚙</button>
+        <button
+          id="btnCharacter"
+          class="hud-icon-btn"
+          title="Character customisation"
+          aria-label="Open character editor"
+        >👤</button>
+      </div>
+
+    </div><!-- /.hud-bl -->
+
+    <!-- ══════════════════════════════════════════════════
+         PAUSE MENU  (Roblox-style)
+         Opens / closes with ESC or the ⚙ HUD button.
+         Left sidebar: Settings | Avatar | Resume | Leave
+         Right content: tab panels for each section.
+         ══════════════════════════════════════════════════ -->
+    <div id="pauseMenu" class="pm-overlay hidden" role="dialog" aria-modal="true" aria-label="Pause menu">
+      <div class="pm-panel">
+
+        <!-- ── Left navigation sidebar ── -->
+        <nav class="pm-nav" aria-label="Menu sections">
+          <div class="pm-brand">WALKWORLD</div>
+
+          <button class="pm-nav-btn pm-nav-active" data-pm-tab="settings" aria-selected="true">
+            <span class="pm-nav-icon">⚙</span> Settings
+          </button>
+          <button class="pm-nav-btn" data-pm-tab="avatar" aria-selected="false">
+            <span class="pm-nav-icon">👤</span> Avatar
+          </button>
+
+          <div class="pm-nav-spacer" aria-hidden="true"></div>
+
+          <button id="pmResume" class="pm-nav-btn pm-nav-resume" aria-label="Resume game">
+            <span class="pm-nav-icon">▶</span> Resume
+          </button>
+          <button id="pmLeave" class="pm-nav-btn pm-nav-leave" aria-label="Leave to lobby">
+            <span class="pm-nav-icon">🚪</span> Leave Game
+          </button>
+        </nav>
+
+        <!-- ── Right content panel ── -->
+        <div class="pm-content">
+
+          <!-- ════ SETTINGS TAB ════ -->
+          <div class="pm-tab" id="pmTabSettings" role="tabpanel">
+            <p class="pm-tab-title">SETTINGS</p>
+
+            <!-- Mouse sensitivity -->
+            <div class="sp-section">
+              <p class="sp-section-title">MOUSE SENSITIVITY</p>
+              <div class="sp-sens-row">
+                <label for="spSensSlider">Sensitivity</label>
+                <input
+                  id="spSensSlider"
+                  class="sp-slider"
+                  type="range"
+                  min="0.0005"
+                  max="0.0080"
+                  step="0.0001"
+                  value="0.0022"
+                  aria-label="Mouse sensitivity"
+                />
+                <span id="spSensVal" class="sp-sens-val">0.0022</span>
+              </div>
+            </div>
+
+            <!-- Key binds -->
+            <div class="sp-section">
+              <p class="sp-section-title">KEY BINDS</p>
+              <div class="sp-bind-row">
+                <span class="sp-bind-label">Forward</span>
+                <button class="sp-bind-btn" data-bind="forward">W</button>
+              </div>
+              <div class="sp-bind-row">
+                <span class="sp-bind-label">Back</span>
+                <button class="sp-bind-btn" data-bind="back">S</button>
+              </div>
+              <div class="sp-bind-row">
+                <span class="sp-bind-label">Left</span>
+                <button class="sp-bind-btn" data-bind="left">A</button>
+              </div>
+              <div class="sp-bind-row">
+                <span class="sp-bind-label">Right</span>
+                <button class="sp-bind-btn" data-bind="right">D</button>
+              </div>
+              <div class="sp-bind-row">
+                <span class="sp-bind-label">Jump</span>
+                <button class="sp-bind-btn" data-bind="jump">Space</button>
+              </div>
+              <div class="sp-bind-row">
+                <span class="sp-bind-label">Sprint</span>
+                <button class="sp-bind-btn" data-bind="sprint">Shift</button>
+              </div>
+              <div class="sp-bind-row">
+                <span class="sp-bind-label">Chat</span>
+                <button class="sp-bind-btn" data-bind="chat">T</button>
+              </div>
+              <div class="sp-bind-row">
+                <span class="sp-bind-label">Map</span>
+                <button class="sp-bind-btn" data-bind="map">M</button>
+              </div>
+            </div>
+
+            <div class="sp-reset-row">
+              <button id="spReset" class="sp-reset-btn">Reset Defaults</button>
+            </div>
+          </div><!-- /#pmTabSettings -->
+
+          <!-- ════ AVATAR TAB ════ -->
+          <div class="pm-tab pm-hidden" id="pmTabAvatar" role="tabpanel">
+            <p class="pm-tab-title">AVATAR</p>
+
+            <div class="pm-avatar-wrap">
+
+              <!-- Mini 3-D preview -->
+              <div class="pm-avatar-preview">
+                <canvas id="pmPreviewCanvas" width="110" height="160"></canvas>
+              </div>
+
+              <!-- Controls -->
+              <div class="pm-avatar-controls">
+
+                <div class="pm-av-section">
+                  <p class="pm-av-label">SKIN</p>
+                  <div class="pm-av-swatches" id="pmSwatchSkin"></div>
+                </div>
+
+                <div class="pm-av-section">
+                  <p class="pm-av-label">SHIRT</p>
+                  <div class="pm-av-swatches" id="pmSwatchShirt"></div>
+                </div>
+
+                <div class="pm-av-section">
+                  <p class="pm-av-label">PANTS</p>
+                  <div class="pm-av-swatches" id="pmSwatchPants"></div>
+                </div>
+
+                <div class="pm-av-section">
+                  <p class="pm-av-label">HAIR STYLE</p>
+                  <div class="pm-av-hair-row" id="pmHairBtns"></div>
+                </div>
+
+                <div class="pm-av-section">
+                  <p class="pm-av-label">HAIR COLOUR</p>
+                  <div class="pm-av-swatches" id="pmSwatchHair"></div>
+                </div>
+
+                <div class="pm-av-section">
+                  <p class="pm-av-label">HEIGHT &nbsp;<span id="pmHeightVal">1.00×</span></p>
+                  <div class="sp-sens-row">
+                    <span style="font-size:13px;color:var(--c-muted)">Short</span>
+                    <input id="pmHeightSlider" class="sp-slider" type="range"
+                           min="0.70" max="1.40" step="0.01" value="1.00" />
+                    <span style="font-size:13px;color:var(--c-muted)">Tall</span>
+                  </div>
+                </div>
+
+              </div><!-- /.pm-avatar-controls -->
+            </div><!-- /.pm-avatar-wrap -->
+
+            <div class="sp-reset-row">
+              <button id="pmAvatarReset" class="sp-reset-btn">Reset Avatar</button>
+            </div>
+          </div><!-- /#pmTabAvatar -->
+
+        </div><!-- /.pm-content -->
+      </div><!-- /.pm-panel -->
+    </div><!-- /#pauseMenu -->
+
+    <!-- ══════════════════════════════════════════════════
+         CHAT
+         ══════════════════════════════════════════════════ -->
+    <div class="chat-panel" id="chatPanel" aria-label="Chat">
+      <div class="chat-messages" id="chatMessages"></div>
+      <form class="chat-form" id="chatForm" autocomplete="off">
+        <input
+          id="chatInput"
+          class="chat-input"
+          type="text"
+          maxlength="80"
+          placeholder="Press T to chat…"
+          disabled
+        />
+        <button class="chat-send" type="submit" aria-label="Send">▶</button>
+      </form>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════
+         WORLD MAP OVERLAY  (toggled with M key)
+         Full-screen overlay with a zoomable top-down map.
+         Canvas is sized by game.js when opened.
+         ══════════════════════════════════════════════════ -->
+    <div id="mapOverlay" class="map-overlay hidden" role="dialog" aria-modal="true" aria-label="World map">
+      <div class="map-modal">
+        <div class="map-header">
+          <span class="map-title">🗺&nbsp; WORLD MAP</span>
+          <div class="map-zoom-btns">
+            <button id="mapZoomOut" class="map-zoom-btn" title="Zoom out  (scroll ↓)" aria-label="Zoom out">−</button>
+            <span   id="mapZoomDisplay" class="map-zoom-val">1.0×</span>
+            <button id="mapZoomIn"  class="map-zoom-btn" title="Zoom in   (scroll ↑)" aria-label="Zoom in">+</button>
+            <button id="mapClose"   class="map-close-btn" title="Close map  (M / ESC)" aria-label="Close map">✕</button>
+          </div>
+        </div>
+        <canvas id="mapCanvas" class="map-canvas"></canvas>
+      </div>
+    </div>
+
+  </div><!-- /#gameWrapper -->
+
+  <!-- ══════════════════════════════════════════════════════
+       SCRIPTS
+       Three.js MUST be a plain <script> (not a module) so
+       it lands on window.THREE before the ES modules run.
+       renderer.js is added here even though game.js imports
+       it, because explicit ordering prevents race conditions
+       on some browsers when the module graph is shallow.
+       ══════════════════════════════════════════════════════ -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+  <script type="module" src="js/firebase-config.js"></script>
+  <script type="module" src="js/network.js"></script>
+  <script type="module" src="js/world.js"></script>
+  <script type="module" src="js/objects.js"></script>
+  <script type="module" src="js/player.js"></script>
+  <script type="module" src="js/character.js"></script>
+  <script type="module" src="js/renderer.js"></script>
+  <script type="module" src="js/game.js"></script>
+
+</body>
+</html>
 <body class="game-page">
 
   <!-- ══════════════════════════════════════════════════════
