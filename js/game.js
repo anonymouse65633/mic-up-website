@@ -721,13 +721,26 @@ function setupPointerLock() {
     if (!isPointerLocked()) requestPointerLock(gameCanvas);
   });
 
-  // Show / hide the lock overlay based on lock state
+  // Show / hide the lock overlay based on lock state.
+  // NOTE: we do NOT auto-open the pause menu here — ESC keydown owns that.
+  // Auto-opening here caused a race: Chrome releases pointer lock BEFORE the
+  // ESC keydown fires, so pointerlockchange was opening the menu and then the
+  // keydown was immediately closing it again.
   document.addEventListener('pointerlockchange', () => {
     if (isPointerLocked()) {
       lockOverlay.classList.add('hidden');
     } else {
-      if (isChatOpen) return;            // chat handles its own flow
-      if (!isPauseOpen) openPauseMenu(); // lock released → show menu immediately
+      if (isChatOpen)  return; // chat handles its own flow
+      if (isMapOpen)   return; // map opened the lock exit — don't show menu/overlay
+      if (!isPauseOpen) lockOverlay.classList.remove('hidden');
+    }
+  });
+
+  // If requestPointerLock() is denied by the browser, show the click overlay
+  // so the user has a clear way to re-enter the game.
+  document.addEventListener('pointerlockerror', () => {
+    if (!isPauseOpen && !isMapOpen && !isChatOpen) {
+      lockOverlay.classList.remove('hidden');
     }
   });
 }
@@ -755,12 +768,15 @@ function setupChat(name, colour) {
     }
 
     if (e.code === 'Escape') {
+      e.preventDefault();
       if (isMapOpen)   { closeMap();       return; }
       if (isChatOpen)  { closeChat();      return; }
       if (isPauseOpen) { closePauseMenu(); return; }
-      // If pointer wasn't locked (e.g. already on lock overlay),
-      // open menu directly since pointerlockchange won't fire.
-      if (!isPointerLocked()) openPauseMenu();
+      // Always open the menu on ESC — whether pointer is locked or not.
+      // (Previously this only opened when !isPointerLocked(), which caused the
+      // menu to not open when Chrome released the lock before the keydown fired.)
+      openPauseMenu();
+      return;
     }
   });
 
