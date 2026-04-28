@@ -2,6 +2,7 @@
    WalkWorld 3D — game.css
    ============================================================ */
 
+/* ── Page & canvas ── */
 .game-page {
   overflow: hidden;
   width: 100vw;
@@ -23,7 +24,10 @@
   outline: none;
 }
 
-/* ── Overlays ── */
+/* ════════════════════════════════════════════════════════════
+   OVERLAYS
+   ════════════════════════════════════════════════════════════ */
+
 .overlay {
   position: fixed; inset: 0; z-index: 100;
   display: flex;
@@ -33,6 +37,7 @@
   backdrop-filter: blur(4px);
 }
 
+/* Loading */
 .loading-box {
   text-align: center;
   display: flex;
@@ -70,6 +75,7 @@
 }
 .load-status { font-size: 18px; color: var(--c-muted); letter-spacing: 2px; }
 
+/* Disconnected */
 .disc-overlay { background: rgba(13,13,26,.97); }
 .disc-box {
   text-align: center;
@@ -100,6 +106,7 @@
 .disc-back { font-size: 16px; color: var(--c-muted); text-decoration: none; }
 .disc-back:hover { color: var(--c-text); }
 
+/* Pointer-lock */
 .lock-overlay {
   position: fixed; inset: 0; z-index: 50;
   display: flex;
@@ -131,7 +138,10 @@
 .lock-title { font-family: var(--font-pixel); font-size: 13px; color: var(--c-accent); letter-spacing: 2px; }
 .lock-sub   { font-size: 17px; color: var(--c-muted); }
 
-/* ── Crosshair ── */
+/* ════════════════════════════════════════════════════════════
+   CROSSHAIR
+   ════════════════════════════════════════════════════════════ */
+
 .crosshair {
   position: absolute;
   top: 50%; left: 50%;
@@ -148,7 +158,69 @@
 .ch-h { width: 16px; height: 2px; top: 50%; left: 50%; transform: translate(-50%, -50%); }
 .ch-v { width: 2px; height: 16px; top: 50%; left: 50%; transform: translate(-50%, -50%); }
 
-/* ── HUD ── */
+/* ════════════════════════════════════════════════════════════
+   CoD-STYLE COMPASS  (top-center)
+   ════════════════════════════════════════════════════════════
+   Layout:
+     .compass-bar-wrap  — outer shell, centres the canvas
+       #compassCanvas   — the scrolling degree strip drawn by game.js
+       .compass-notch   — fixed centre triangle pointing down
+   ════════════════════════════════════════════════════════════ */
+
+.compass-bar-wrap {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 15;
+  pointer-events: none;
+  user-select: none;
+
+  /* Clip so only the canvas shows — hide the overflow on each side */
+  width: 320px;
+  overflow: hidden;
+
+  /* Subtle fade-to-transparent on left/right edges */
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0%,
+    black 15%,
+    black 85%,
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0%,
+    black 15%,
+    black 85%,
+    transparent 100%
+  );
+}
+
+#compassCanvas {
+  display: block;
+  /* Width & height are set in JS; CSS just keeps it visible */
+}
+
+/* The fixed centre notch — a downward-pointing triangle that
+   never moves. The canvas scrolls behind it. */
+.compass-notch {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0; height: 0;
+  border-left:  5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top:   8px solid var(--c-accent);
+  filter: drop-shadow(0 0 4px var(--c-accent));
+  pointer-events: none;
+}
+
+/* ════════════════════════════════════════════════════════════
+   HUD  (base + corners)
+   ════════════════════════════════════════════════════════════ */
+
 .hud {
   position: absolute;
   z-index: 10;
@@ -156,6 +228,7 @@
   user-select: none;
 }
 
+/* Top-left: player name / pos / zone */
 .hud-tl {
   top: 14px; left: 14px;
   display: flex;
@@ -178,6 +251,8 @@
 .hud-pos  { font-size: 14px; color: var(--c-muted); letter-spacing: 1px; }
 .hud-zone { font-family: var(--font-pixel); font-size: 7px; color: var(--c-accent); letter-spacing: 1px; }
 
+/* Top-right: online count
+   Sits above the minimap which renderer.js places at top:70px */
 .hud-tr {
   top: 14px; right: 14px;
   display: flex;
@@ -192,6 +267,7 @@
   color: var(--c-text);
 }
 
+/* Bottom-left: controls hint + HUD icon buttons */
 .hud-bl {
   position: absolute;
   bottom: 14px; left: 14px;
@@ -203,33 +279,10 @@
   user-select: none;
 }
 
-.compass {
-  width: 44px; height: 44px;
-  border-radius: 50%;
-  border: 2px solid var(--c-border);
-  background: rgba(13,13,26,.75);
-  backdrop-filter: blur(6px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-}
-.compass::before {
-  content: '';
-  position: absolute;
-  top: 5px; left: 50%;
-  transform: translateX(-50%);
-  width: 0; height: 0;
-  border-left: 4px solid transparent;
-  border-right: 4px solid transparent;
-  border-bottom: 8px solid var(--c-accent);
-}
-.compass-dir {
-  font-family: var(--font-pixel);
-  font-size: 8px;
-  color: var(--c-text);
-  margin-top: 4px;
-}
+/* The old round compass is kept in markup for the compassDir
+   fallback text but is hidden now that the CoD bar is live. */
+.compass { display: none; }
+.compass-dir { display: none; }
 
 .controls-hint {
   font-size: 14px;
@@ -241,7 +294,222 @@
   backdrop-filter: blur(4px);
 }
 
-/* ── Chat ── */
+/* ════════════════════════════════════════════════════════════
+   HUD ICON BUTTONS  (settings ⚙ / character 👤)
+   Small square buttons that live in .hud-bl and are
+   pointer-events: all so they are actually clickable.
+   ════════════════════════════════════════════════════════════ */
+
+.hud-icon-row {
+  display: flex;
+  gap: 6px;
+  pointer-events: all;
+}
+
+.hud-icon-btn {
+  width: 34px; height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(13,13,26,.78);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  backdrop-filter: blur(6px);
+  color: var(--c-muted);
+  font-size: 17px;
+  cursor: pointer;
+  transition: color .15s, border-color .15s, background .15s;
+  /* Prevent text selection on double-click */
+  user-select: none;
+}
+.hud-icon-btn:hover {
+  color: var(--c-accent);
+  border-color: var(--c-accent);
+  background: rgba(0,245,196,.08);
+}
+.hud-icon-btn.active {
+  color: var(--c-accent);
+  border-color: var(--c-accent);
+  background: rgba(0,245,196,.12);
+  box-shadow: 0 0 8px rgba(0,245,196,.25);
+}
+
+/* ════════════════════════════════════════════════════════════
+   SETTINGS PANEL
+   ════════════════════════════════════════════════════════════ */
+
+#settingsPanel {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 75;
+  width: min(380px, 94vw);
+  max-height: 88dvh;
+  overflow-y: auto;
+  background: var(--c-surface);
+  border: 2px solid var(--c-border);
+  border-radius: var(--radius);
+  box-shadow: 0 0 0 1px var(--c-border), 0 16px 56px rgba(0,0,0,.8);
+  font-family: var(--font-vt);
+  color: var(--c-text);
+  scrollbar-width: thin;
+  scrollbar-color: var(--c-border) transparent;
+}
+#settingsPanel::-webkit-scrollbar       { width: 4px; }
+#settingsPanel::-webkit-scrollbar-track { background: transparent; }
+#settingsPanel::-webkit-scrollbar-thumb { background: var(--c-border); border-radius: 2px; }
+
+/* Sticky header */
+.sp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--c-border);
+  position: sticky;
+  top: 0;
+  background: var(--c-surface);
+  z-index: 2;
+}
+.sp-title {
+  font-family: var(--font-pixel);
+  font-size: 9px;
+  color: var(--c-accent);
+  letter-spacing: 2px;
+}
+.sp-close {
+  background: none;
+  border: none;
+  color: var(--c-muted);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  transition: color .15s;
+}
+.sp-close:hover { color: var(--c-text); }
+
+/* Body */
+.sp-body {
+  padding: 12px 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* Section */
+.sp-section { display: flex; flex-direction: column; gap: 8px; }
+.sp-section-title {
+  font-family: var(--font-pixel);
+  font-size: 7px;
+  color: var(--c-muted);
+  letter-spacing: 2px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--c-border);
+}
+
+/* Sensitivity row */
+.sp-sens-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sp-sens-row label {
+  font-size: 17px;
+  color: var(--c-muted);
+  flex-shrink: 0;
+  min-width: 70px;
+}
+.sp-slider {
+  flex: 1;
+  accent-color: var(--c-accent);
+  cursor: pointer;
+  height: 4px;
+}
+.sp-sens-val {
+  font-family: var(--font-pixel);
+  font-size: 8px;
+  color: var(--c-accent);
+  min-width: 42px;
+  text-align: right;
+}
+
+/* Key-bind rows */
+.sp-bind-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(42,42,90,.5);
+}
+.sp-bind-row:last-child { border-bottom: none; }
+
+.sp-bind-label {
+  font-size: 18px;
+  color: var(--c-text);
+  flex: 1;
+  text-transform: capitalize;
+}
+
+.sp-bind-btn {
+  min-width: 90px;
+  padding: 5px 10px;
+  background: var(--c-bg);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  color: var(--c-accent);
+  font-family: var(--font-pixel);
+  font-size: 7px;
+  letter-spacing: 1px;
+  cursor: pointer;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: border-color .15s, background .15s, color .15s;
+}
+.sp-bind-btn:hover:not(.sp-listening) {
+  border-color: var(--c-accent);
+  background: rgba(0,245,196,.06);
+}
+
+/* "Listening" state — waiting for a key press */
+.sp-bind-btn.sp-listening {
+  color: var(--c-accent2);
+  border-color: var(--c-accent2);
+  background: rgba(124,108,247,.12);
+  animation: spBlink .7s step-end infinite;
+}
+@keyframes spBlink {
+  0%,100% { opacity: 1; }
+  50%      { opacity: .45; }
+}
+
+/* Reset row */
+.sp-reset-row {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 2px;
+}
+.sp-reset-btn {
+  padding: 7px 16px;
+  background: none;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  color: var(--c-muted);
+  font-family: var(--font-vt);
+  font-size: 17px;
+  cursor: pointer;
+  transition: color .15s, border-color .15s;
+}
+.sp-reset-btn:hover { color: var(--c-danger); border-color: var(--c-danger); }
+
+/* ════════════════════════════════════════════════════════════
+   CHAT
+   ════════════════════════════════════════════════════════════ */
+
 .chat-panel {
   position: absolute;
   bottom: 14px; right: 14px;
@@ -293,9 +561,9 @@
   outline: none;
   transition: border-color .2s;
 }
-.chat-input:focus   { border-color: var(--c-accent); }
-.chat-input:disabled { opacity: 0; pointer-events: none; }
-.chat-input::placeholder { color: var(--c-muted); }
+.chat-input:focus            { border-color: var(--c-accent); }
+.chat-input:disabled         { opacity: 0; pointer-events: none; }
+.chat-input::placeholder     { color: var(--c-muted); }
 
 .chat-send {
   background: var(--c-accent);
@@ -309,14 +577,28 @@
 }
 @media (pointer: coarse) { .chat-send { display: flex; } }
 
-.chat-messages::-webkit-scrollbar { width: 4px; }
+.chat-messages::-webkit-scrollbar       { width: 4px; }
 .chat-messages::-webkit-scrollbar-track { background: transparent; }
 .chat-messages::-webkit-scrollbar-thumb { background: var(--c-border); border-radius: 2px; }
 
+/* ════════════════════════════════════════════════════════════
+   RESPONSIVE
+   ════════════════════════════════════════════════════════════ */
+
 @media (max-width: 600px) {
-  .hud-tr       { font-size: 14px; }
-  .hud-tl       { padding: 6px 9px; }
-  .chat-panel   { width: calc(100vw - 20px); right: 10px; bottom: 10px; }
-  .controls-hint { display: none; }
-  .compass      { display: none; }
+  .hud-tr            { font-size: 14px; }
+  .hud-tl            { padding: 6px 9px; }
+  .chat-panel        { width: calc(100vw - 20px); right: 10px; bottom: 10px; }
+  .controls-hint     { display: none; }
+
+  /* Compass shrinks on small screens */
+  .compass-bar-wrap  { width: 220px; }
+
+  /* Settings panel fills more of the screen */
+  #settingsPanel     { max-height: 96dvh; }
+}
+
+@media (max-width: 400px) {
+  .compass-bar-wrap  { width: 170px; }
+  .hud-icon-btn      { width: 30px; height: 30px; font-size: 15px; }
 }
