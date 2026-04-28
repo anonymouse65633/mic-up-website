@@ -464,8 +464,9 @@ function setupPointerLock() {
   document.addEventListener('pointerlockchange', () => {
     if (isPointerLocked()) {
       lockOverlay.classList.add('hidden');
-    } else if (!isChatOpen && !isPauseOpen) {
-      lockOverlay.classList.remove('hidden');
+    } else {
+      if (isChatOpen) return;            // chat handles its own flow
+      if (!isPauseOpen) openPauseMenu(); // lock released → show menu immediately
     }
   });
 }
@@ -486,7 +487,9 @@ function setupChat(name, colour) {
     if (e.code === 'Escape') {
       if (isChatOpen)  { closeChat();      return; }
       if (isPauseOpen) { closePauseMenu(); return; }
-      openPauseMenu();
+      // If pointer wasn't locked (e.g. already on lock overlay),
+      // open menu directly since pointerlockchange won't fire.
+      if (!isPointerLocked()) openPauseMenu();
     }
   });
 
@@ -650,11 +653,10 @@ function _switchTab(tabName) {
 function openPauseMenu(tab = 'settings') {
   isPauseOpen = true;
   pauseMenu.classList.remove('hidden');
+  lockOverlay.classList.add('hidden');
   btnSettings?.classList.add('active');
   if (isPointerLocked()) document.exitPointerLock();
-  lockOverlay.classList.add('hidden');
   _switchTab(tab);
-  // Sync sensitivity slider to current value
   if (sensSlider)  sensSlider.value = String(window.WALKWORLD_SENS);
   if (sensValueEl) sensValueEl.textContent = Number(window.WALKWORLD_SENS).toFixed(4);
 }
