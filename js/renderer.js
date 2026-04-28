@@ -23,6 +23,7 @@
 
 import { scene, WORLD_SIZE, HALF, getZoneName } from './world.js';
 import { camera }                                from './player.js';
+import { buildCharacter }                        from './character.js';
 
 // ── Minimap constants ─────────────────────────────────────────
 const MINIMAP_SIZE = 130;   // px (displayed square, CSS clips to circle)
@@ -146,7 +147,9 @@ export class Renderer {
 
     // ── Remote player state ──────────────────────────────────
     // { [id]: THREE.Group }
-    this._remoteGroups = {};
+    this._remoteGroups  = {};
+    // { [id]: string } — tracks last avatar signature to detect changes
+    this._remoteCharSig = {};
 
     // ── Chat bubble store ────────────────────────────────────
     // { [id]: { text: string, expires: number } }
@@ -196,16 +199,24 @@ export class Renderer {
       if (!live.has(id)) {
         scene.remove(this._remoteGroups[id]);
         delete this._remoteGroups[id];
+        delete this._remoteCharSig[id];
       }
     }
 
     const t = timestamp * 0.003; // walk cycle time
 
     for (const [id, p] of Object.entries(remotePlayers)) {
-      // Create group if new player
-      if (!this._remoteGroups[id]) {
-        const grp = makeBlockChar(p.colour || '#ffffff');
-        this._remoteGroups[id] = grp;
+      // Signature to detect avatar changes (charConfig or colour)
+      const sig = p.charConfig ? JSON.stringify(p.charConfig) : (p.colour || '#ffffff');
+
+      // Create or rebuild group when player is new or avatar changed
+      if (!this._remoteGroups[id] || this._remoteCharSig[id] !== sig) {
+        if (this._remoteGroups[id]) scene.remove(this._remoteGroups[id]);
+        const grp = p.charConfig
+          ? buildCharacter(p.charConfig)
+          : makeBlockChar(p.colour || '#ffffff');
+        this._remoteGroups[id]  = grp;
+        this._remoteCharSig[id] = sig;
         scene.add(grp);
       }
 
@@ -217,7 +228,7 @@ export class Renderer {
 
       // Walk animation — swing arms & legs
       // children: [0]head [1]torso [2]lArm [3]rArm [4]lLeg [5]rLeg
-      if (grp.children.length === 6) {
+      if (grp.children.length >= 6) {
         const swing = Math.sin(t) * 0.40;
         grp.children[2].rotation.x =  swing;   // lArm
         grp.children[3].rotation.x = -swing;   // rArm
