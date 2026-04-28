@@ -91,7 +91,6 @@ const loadingOverlay      = document.getElementById('loadingOverlay');
 const loadBar             = document.getElementById('loadBar');
 const loadStatus          = document.getElementById('loadStatus');
 const disconnectedOverlay = document.getElementById('disconnectedOverlay');
-const lockOverlay         = document.getElementById('lockOverlay');
 const gameWrapper         = document.getElementById('gameWrapper');
 const gameCanvas          = document.getElementById('gameCanvas');
 
@@ -235,7 +234,7 @@ async function init() {
 
   loadingOverlay.classList.add('hidden');
   gameWrapper.classList.remove('hidden');
-  lockOverlay.classList.remove('hidden'); // prompt to click
+  // Pointer lock will be acquired on first canvas click (no "click to play" overlay)
 
   lastTime = performance.now();
   rafId    = requestAnimationFrame(gameLoop);
@@ -250,6 +249,10 @@ async function init() {
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
       if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+      // Open pause menu when tab loses focus (if gameplay is active)
+      if (!isPauseOpen && !isChatOpen && !isMapOpen) {
+        openPauseMenu();
+      }
     } else {
       lastTime = performance.now();
       rafId = requestAnimationFrame(gameLoop);
@@ -330,7 +333,7 @@ function updateCompass() {
 
   compassCtx.clearRect(0, 0, W, H);
 
-  // Background — plain fillRect avoids roundRect browser-compat issues
+  // Background
   compassCtx.fillStyle = 'rgba(10,10,22,0.92)';
   compassCtx.fillRect(0, 0, W, H);
 
@@ -338,29 +341,19 @@ function updateCompass() {
   compassCtx.fillStyle = 'rgba(0,245,196,0.55)';
   compassCtx.fillRect(0, H - 2, W, 2);
 
-  // Ticks and labels — draw ±90° either side of current bearing
+  // ── Minor / mid ticks at every integer offset from centre ──
+  // These give the visual texture of the scrolling strip.
   for (let offset = -90; offset <= 90; offset++) {
-    const deg = ((bearing + offset) % 360 + 360) % 360;
-    const sx  = Math.round(W / 2 + offset * DEG_PX);
-
+    const sx = Math.round(W / 2 + offset * DEG_PX);
+    // Classify tick by rounding the degree value at this integer offset.
+    // We round bearing so that minor tick spacing stays consistent.
+    const deg = ((Math.round(bearing) + offset) % 360 + 360) % 360;
     const isMajor = deg % 45 === 0;
-    const isMid   = deg % 15 === 0 && !isMajor;
-    const isMinor = deg % 5  === 0 && !isMajor && !isMid;
+    const isMid   = !isMajor && deg % 15 === 0;
+    const isMinor = !isMajor && !isMid && deg % 5 === 0;
 
     if (isMajor) {
-      // Bold bright tick
-      compassCtx.fillStyle = 'rgba(0,245,196,1)';
-      compassCtx.fillRect(sx - 1, 2, 2, H * 0.55);
-
-      const label = CARDINAL.find(([v]) => v === deg);
-      if (label) {
-        // Use a reliable system font so it renders even before web-fonts load
-        compassCtx.font         = 'bold 10px "Courier New", monospace';
-        compassCtx.fillStyle    = '#00f5c4';
-        compassCtx.textAlign    = 'center';
-        compassCtx.textBaseline = 'bottom';
-        compassCtx.fillText(label[1], sx, H - 4);
-      }
+      // Drawn separately below using float positions — skip here
     } else if (isMid) {
       compassCtx.fillStyle = 'rgba(255,255,255,0.45)';
       const th = H * 0.30;
@@ -371,6 +364,33 @@ function updateCompass() {
       compassCtx.fillRect(sx, (H - th) * 0.5, 1, th);
     }
   }
+
+  // ── Cardinal / intercardinal labels at their REAL fractional positions ──
+  // By computing offset as a float we avoid the "only shows at 0°" bug where
+  // integer iteration never lands exactly on a non-integer offset.
+  compassCtx.font         = 'bold 10px "Courier New", monospace';
+  compassCtx.textAlign    = 'center';
+  compassCtx.textBaseline = 'bottom';
+
+  CARDINAL.forEach(([cardDeg, label]) => {
+    if (cardDeg === 360) return; // skip duplicate N
+    // Float offset of this cardinal from the current bearing
+    let offset = cardDeg - bearing;
+    // Normalise to (−180, +180] so we pick the nearest crossing
+    if (offset >  180) offset -= 360;
+    if (offset < -180) offset += 360;
+    if (Math.abs(offset) > 90) return; // outside visible window
+
+    const sx = W / 2 + offset * DEG_PX;
+
+    // Bold bright tick
+    compassCtx.fillStyle = 'rgba(0,245,196,1)';
+    compassCtx.fillRect(Math.round(sx) - 1, 2, 2, H * 0.55);
+
+    // Label
+    compassCtx.fillStyle = '#00f5c4';
+    compassCtx.fillText(label, sx, H - 4);
+  });
 
   // Centre marker — downward-pointing triangle at top edge
   compassCtx.fillStyle = '#ffffff';
@@ -543,8 +563,7 @@ function openMap() {
 function closeMap() {
   isMapOpen = false;
   document.getElementById('mapOverlay')?.classList.add('hidden');
-  // Re-acquire pointer lock automatically (same pattern as closePauseMenu)
-  lockOverlay.classList.add('hidden');
+  // Re-acquire pointer lock automatically
   requestPointerLock(gameCanvas);
 }
 
@@ -711,37 +730,19 @@ function setupMap() {
   }, { passive: false });
 }
 function setupPointerLock() {
-  // Clicking the lock overlay captures the mouse
-  lockOverlay.addEventListener('click', () => {
-    requestPointerLock(gameCanvas);
-  });
-
-  // Clicking the canvas itself also works (e.g. after ESC)
+  // Clicking the canvas captures the mouse (no "click to play" overlay needed)
   gameCanvas.addEventListener('click', () => {
     if (!isPointerLocked()) requestPointerLock(gameCanvas);
   });
 
-  // Show / hide the lock overlay based on lock state.
-  // NOTE: we do NOT auto-open the pause menu here — ESC keydown owns that.
-  // Auto-opening here caused a race: Chrome releases pointer lock BEFORE the
-  // ESC keydown fires, so pointerlockchange was opening the menu and then the
-  // keydown was immediately closing it again.
+  // pointerlockchange: nothing special needed — no overlay to show/hide
   document.addEventListener('pointerlockchange', () => {
-    if (isPointerLocked()) {
-      lockOverlay.classList.add('hidden');
-    } else {
-      if (isChatOpen)  return; // chat handles its own flow
-      if (isMapOpen)   return; // map opened the lock exit — don't show menu/overlay
-      if (!isPauseOpen) lockOverlay.classList.remove('hidden');
-    }
+    // If pointer lock is lost outside of chat/map/pause, it just means the
+    // user pressed ESC; the keydown handler will open the pause menu.
   });
 
-  // If requestPointerLock() is denied by the browser, show the click overlay
-  // so the user has a clear way to re-enter the game.
   document.addEventListener('pointerlockerror', () => {
-    if (!isPauseOpen && !isMapOpen && !isChatOpen) {
-      lockOverlay.classList.remove('hidden');
-    }
+    console.warn('[Game] Pointer lock request denied.');
   });
 }
 
@@ -802,8 +803,8 @@ function closeChat() {
   isChatOpen = false;
   chatInput.disabled = true;
   chatInput.blur();
-  // Re-show lock overlay so user can click back in
-  lockOverlay.classList.remove('hidden');
+  // Re-acquire pointer lock so user can look around immediately
+  requestPointerLock(gameCanvas);
 }
 
 function renderChat(messages) {
@@ -848,25 +849,41 @@ function setupPauseMenu() {
 
   // ── HUD buttons ──────────────────────────────────────────
   btnSettings?.addEventListener('click', () => {
-    isPauseOpen ? closePauseMenu() : openPauseMenu('settings');
+    isPauseOpen ? closePauseMenu() : openPauseMenu('main');
   });
 
   btnCharacter?.addEventListener('click', () => {
     openPauseMenu('avatar');
   });
 
-  // ── Tab switching ────────────────────────────────────────
+  // ── Nav items (Settings / Avatar) ────────────────────────
   pauseMenu.querySelectorAll('[data-pm-tab]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const tab = btn.dataset.pmTab;
-      _switchTab(tab);
-    });
+    btn.addEventListener('click', () => _switchTab(btn.dataset.pmTab));
   });
 
-  // ── Resume / Leave ───────────────────────────────────────
+  // ── Back buttons (return to main screen) ─────────────────
+  pauseMenu.querySelectorAll('[data-pm-back]').forEach(btn => {
+    btn.addEventListener('click', () => _switchTab(btn.dataset.pmBack));
+  });
+
+  // ── Resume ───────────────────────────────────────────────
   document.getElementById('pmResume')?.addEventListener('click', closePauseMenu);
+
+  // ── Leave ────────────────────────────────────────────────
   document.getElementById('pmLeave')?.addEventListener('click', () => {
     window.location.href = 'index.html';
+  });
+
+  // ── Reset Character ──────────────────────────────────────
+  document.getElementById('pmResetChar')?.addEventListener('click', () => {
+    if (player) {
+      player.x = 0;
+      player.y = 2.0;
+      player.z = 5;
+      player.vy = 0;
+      player.onGround = false;
+    }
+    closePauseMenu();
   });
 
   // ── Sensitivity slider ───────────────────────────────────
@@ -926,21 +943,22 @@ function setupPauseMenu() {
 }
 
 function _switchTab(tabName) {
-  // Update nav active state
-  pauseMenu.querySelectorAll('[data-pm-tab]').forEach(b => {
-    b.classList.toggle('pm-nav-active', b.dataset.pmTab === tabName);
-  });
-  // Show/hide tab panels
-  document.getElementById('pmTabSettings')?.classList.toggle('pm-hidden', tabName !== 'settings');
-  document.getElementById('pmTabAvatar')?.classList.toggle('pm-hidden', tabName !== 'avatar');
-  // If avatar tab, start preview spin
+  const pmMain         = document.getElementById('pmMain');
+  const pmTabSettings  = document.getElementById('pmTabSettings');
+  const pmTabAvatar    = document.getElementById('pmTabAvatar');
+
+  // Show/hide panels based on which tab is active
+  pmMain?.classList.toggle('pm-hidden', tabName !== 'main');
+  pmTabSettings?.classList.toggle('pm-hidden', tabName !== 'settings');
+  pmTabAvatar?.classList.toggle('pm-hidden', tabName !== 'avatar');
+
+  // Kick off avatar preview spin when avatar tab opens
   if (tabName === 'avatar') _tickAvatarPreview();
 }
 
-function openPauseMenu(tab = 'settings') {
+function openPauseMenu(tab = 'main') {
   isPauseOpen = true;
   pauseMenu.classList.remove('hidden');
-  lockOverlay.classList.add('hidden');
   btnSettings?.classList.add('active');
   if (isPointerLocked()) document.exitPointerLock();
   _switchTab(tab);
@@ -952,10 +970,7 @@ function closePauseMenu() {
   isPauseOpen = false;
   pauseMenu?.classList.add('hidden');
   btnSettings?.classList.remove('active');
-  // Re-acquire pointer lock automatically — no need to click the canvas again.
-  // Hide the overlay pre-emptively; the pointerlockchange handler will re-show
-  // it if the browser denies the request for any reason.
-  lockOverlay.classList.add('hidden');
+  // Re-acquire pointer lock automatically
   requestPointerLock(gameCanvas);
 }
 
