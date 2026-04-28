@@ -28,6 +28,12 @@ import {
   sendChat,
   onChat,
 } from './network.js';
+import {
+  buildCharacter,
+  getLocalCharConfig,
+  saveLocalCharConfig,
+  DEFAULT_CHAR_CONFIG,
+} from './character.js';
 
 // ============================================================
 //  SETTINGS
@@ -109,12 +115,12 @@ const chatMessages = document.getElementById('chatMessages');
 const chatForm     = document.getElementById('chatForm');
 const chatInput    = document.getElementById('chatInput');
 
-// Settings
-const settingsPanel = document.getElementById('settingsPanel');
-const settingsBtn   = document.getElementById('settingsBtn');
-const sensSlider    = document.getElementById('sensSlider');
-const sensValueEl   = document.getElementById('sensValue');
-const settingsClose = document.getElementById('settingsClose');
+// Pause menu
+const pauseMenu  = document.getElementById('pauseMenu');
+const btnSettings = document.getElementById('btnSettings');
+const btnCharacter = document.getElementById('btnCharacter');
+const sensSlider  = document.getElementById('spSensSlider');
+const sensValueEl = document.getElementById('spSensVal');
 
 // ============================================================
 //  RUNTIME STATE
@@ -125,7 +131,7 @@ let remotePlayers = {};
 let lastTime      = 0;
 let rafId         = null;
 let isChatOpen    = false;
-let isSettingsOpen = false;
+let isPauseOpen   = false;
 
 let _lastPosSend = 0;
 const POS_INTERVAL = 100; // ms between Firebase position writes (~10 Hz)
@@ -195,8 +201,9 @@ async function init() {
   onChat(msgs => renderChat(msgs));
   setupChat(name, colour);
   setupPointerLock();
-  setupSettings();
+  setupPauseMenu();
   buildMinimapCache();
+  initAvatarPreview();
 
   setLoad(100, 'Ready!');
   await delay(300);
@@ -234,7 +241,7 @@ function gameLoop(timestamp) {
   lastTime  = timestamp;
 
   // Only update player physics when gameplay is active
-  if (!isChatOpen && !isSettingsOpen) {
+  if (!isChatOpen && !isPauseOpen) {
     player.update(dt);
   }
 
@@ -457,7 +464,7 @@ function setupPointerLock() {
   document.addEventListener('pointerlockchange', () => {
     if (isPointerLocked()) {
       lockOverlay.classList.add('hidden');
-    } else if (!isChatOpen && !isSettingsOpen) {
+    } else if (!isChatOpen && !isPauseOpen) {
       lockOverlay.classList.remove('hidden');
     }
   });
@@ -470,15 +477,16 @@ function setupChat(name, colour) {
   document.addEventListener('keydown', e => {
     const chatKey = (window.WALKWORLD_BINDS || DEFAULT_BINDS).chat;
 
-    if (e.code === chatKey && !isChatOpen && !isSettingsOpen && isPointerLocked()) {
+    if (e.code === chatKey && !isChatOpen && !isPauseOpen && isPointerLocked()) {
       e.preventDefault();
       openChat();
       return;
     }
 
     if (e.code === 'Escape') {
-      if (isChatOpen)     closeChat();
-      if (isSettingsOpen) closeSettings();
+      if (isChatOpen)  { closeChat();      return; }
+      if (isPauseOpen) { closePauseMenu(); return; }
+      openPauseMenu();
     }
   });
 
@@ -542,26 +550,39 @@ function renderChat(messages) {
 }
 
 // ============================================================
-//  SETTINGS
+//  PAUSE MENU
 // ============================================================
-function setupSettings() {
-  if (!settingsPanel) return;
 
-  // HUD settings button (⚙)
-  settingsBtn?.addEventListener('click', () => {
-    isSettingsOpen ? closeSettings() : openSettings();
+function setupPauseMenu() {
+  if (!pauseMenu) return;
+
+  // ── HUD buttons ──────────────────────────────────────────
+  btnSettings?.addEventListener('click', () => {
+    isPauseOpen ? closePauseMenu() : openPauseMenu('settings');
   });
 
-  // Close button inside the panel
-  settingsClose?.addEventListener('click', closeSettings);
+  btnCharacter?.addEventListener('click', () => {
+    openPauseMenu('avatar');
+  });
 
-  // Sensitivity slider
+  // ── Tab switching ────────────────────────────────────────
+  pauseMenu.querySelectorAll('[data-pm-tab]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.pmTab;
+      _switchTab(tab);
+    });
+  });
+
+  // ── Resume / Leave ───────────────────────────────────────
+  document.getElementById('pmResume')?.addEventListener('click', closePauseMenu);
+  document.getElementById('pmLeave')?.addEventListener('click', () => {
+    window.location.href = 'index.html';
+  });
+
+  // ── Sensitivity slider ───────────────────────────────────
   if (sensSlider) {
-    sensSlider.min   = '0.0005';
-    sensSlider.max   = '0.005';
-    sensSlider.step  = '0.0001';
     sensSlider.value = String(window.WALKWORLD_SENS);
-    if (sensValueEl) sensValueEl.textContent = window.WALKWORLD_SENS.toFixed(4);
+    if (sensValueEl) sensValueEl.textContent = Number(window.WALKWORLD_SENS).toFixed(4);
 
     sensSlider.addEventListener('input', () => {
       window.WALKWORLD_SENS = parseFloat(sensSlider.value);
@@ -570,57 +591,229 @@ function setupSettings() {
     });
   }
 
-  // Key bind buttons — each has data-bind="actionName"
+  // ── Key bind buttons ─────────────────────────────────────
   document.querySelectorAll('[data-bind]').forEach(btn => {
     const action = btn.dataset.bind;
     btn.textContent = prettyCode((window.WALKWORLD_BINDS || {})[action] || action);
 
     btn.addEventListener('click', () => {
-      // Visual feedback while waiting for key press
       const prev = btn.textContent;
       btn.textContent = '…';
-      btn.classList.add('binding');
+      btn.classList.add('sp-listening');
 
       const capture = e => {
-        e.preventDefault();
-        e.stopImmediatePropagation();
+        e.preventDefault(); e.stopImmediatePropagation();
         window.WALKWORLD_BINDS[action] = e.code;
         btn.textContent = prettyCode(e.code);
-        btn.classList.remove('binding');
+        btn.classList.remove('sp-listening');
         saveSettings();
-        window.removeEventListener('keydown', capture, true);
-      };
-
-      // Cancel if user presses Escape
-      const cancel = e => {
-        if (e.code !== 'Escape') return;
-        btn.textContent = prev;
-        btn.classList.remove('binding');
         window.removeEventListener('keydown', capture, true);
         window.removeEventListener('keydown', cancel,  true);
       };
-
+      const cancel = e => {
+        if (e.code !== 'Escape') return;
+        btn.textContent = prev;
+        btn.classList.remove('sp-listening');
+        window.removeEventListener('keydown', capture, true);
+        window.removeEventListener('keydown', cancel,  true);
+      };
       window.addEventListener('keydown', capture, true);
       window.addEventListener('keydown', cancel,  true);
     });
   });
+
+  // ── Reset defaults ───────────────────────────────────────
+  document.getElementById('spReset')?.addEventListener('click', () => {
+    window.WALKWORLD_SENS  = DEFAULT_SENS;
+    window.WALKWORLD_BINDS = { ...DEFAULT_BINDS };
+    saveSettings();
+    if (sensSlider)   sensSlider.value = String(DEFAULT_SENS);
+    if (sensValueEl)  sensValueEl.textContent = DEFAULT_SENS.toFixed(4);
+    document.querySelectorAll('[data-bind]').forEach(b => {
+      b.textContent = prettyCode(DEFAULT_BINDS[b.dataset.bind]);
+    });
+  });
 }
 
-function openSettings() {
-  isSettingsOpen = true;
-  settingsPanel.classList.remove('hidden');
+function _switchTab(tabName) {
+  // Update nav active state
+  pauseMenu.querySelectorAll('[data-pm-tab]').forEach(b => {
+    b.classList.toggle('pm-nav-active', b.dataset.pmTab === tabName);
+  });
+  // Show/hide tab panels
+  document.getElementById('pmTabSettings')?.classList.toggle('pm-hidden', tabName !== 'settings');
+  document.getElementById('pmTabAvatar')?.classList.toggle('pm-hidden', tabName !== 'avatar');
+  // If avatar tab, start preview spin
+  if (tabName === 'avatar') _tickAvatarPreview();
+}
+
+function openPauseMenu(tab = 'settings') {
+  isPauseOpen = true;
+  pauseMenu.classList.remove('hidden');
+  btnSettings?.classList.add('active');
   if (isPointerLocked()) document.exitPointerLock();
-
-  // Keep slider in sync with current value
-  if (sensSlider)   sensSlider.value = String(window.WALKWORLD_SENS);
-  if (sensValueEl)  sensValueEl.textContent = window.WALKWORLD_SENS.toFixed(4);
+  lockOverlay.classList.add('hidden');
+  _switchTab(tab);
+  // Sync sensitivity slider to current value
+  if (sensSlider)  sensSlider.value = String(window.WALKWORLD_SENS);
+  if (sensValueEl) sensValueEl.textContent = Number(window.WALKWORLD_SENS).toFixed(4);
 }
 
-function closeSettings() {
-  isSettingsOpen = false;
-  settingsPanel?.classList.add('hidden');
-  // Let the player click back in
+function closePauseMenu() {
+  isPauseOpen = false;
+  pauseMenu?.classList.add('hidden');
+  btnSettings?.classList.remove('active');
   lockOverlay.classList.remove('hidden');
+}
+
+// ============================================================
+//  AVATAR PREVIEW (inside pause menu Avatar tab)
+// ============================================================
+const SKIN_PRESETS  = ['#f0c890','#d4956a','#a0643a','#7a3f20','#4a2010','#ffe0d0'];
+const SHIRT_PRESETS = ['#1e90ff','#e03030','#2ed573','#ffa502','#a29bfe','#fd79a8','#ffffff','#333355'];
+const PANTS_PRESETS = ['#2c2c3a','#1a3a6a','#3a2010','#2a4a2a','#555555','#8b6914','#000000','#4a0a0a'];
+const HAIR_PRESETS  = ['#3a2010','#1a1a1a','#c8a020','#e08030','#a0a0a0','#ffffff','#e03030','#4060c0'];
+const HAIR_STYLES   = ['none','straight','afro','spiky','bun'];
+
+let _avPrevRenderer = null;
+let _avPrevScene    = null;
+let _avPrevCam      = null;
+let _avPrevGroup    = null;
+let _avSpinning     = false;
+
+function initAvatarPreview() {
+  const canvas = document.getElementById('pmPreviewCanvas');
+  if (!canvas || typeof THREE === 'undefined') return;
+
+  const W = 110, H = 160;
+  _avPrevRenderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  _avPrevRenderer.setSize(W, H);
+  _avPrevRenderer.setClearColor(0x000000, 0);
+
+  _avPrevScene = new THREE.Scene();
+  _avPrevScene.add(new THREE.AmbientLight(0xffffff, 0.7));
+  const dl = new THREE.DirectionalLight(0xfff0cc, 0.9);
+  dl.position.set(2, 4, 3);
+  _avPrevScene.add(dl);
+
+  _avPrevCam = new THREE.PerspectiveCamera(42, W / H, 0.1, 50);
+  _avPrevCam.position.set(0, 1.0, 3.5);
+  _avPrevCam.lookAt(0, 1.0, 0);
+
+  // Build swatch grids + hair buttons
+  _buildSwatches('pmSwatchSkin',  SKIN_PRESETS,  'skinColour');
+  _buildSwatches('pmSwatchShirt', SHIRT_PRESETS, 'shirtColour');
+  _buildSwatches('pmSwatchPants', PANTS_PRESETS, 'pantsColour');
+  _buildSwatches('pmSwatchHair',  HAIR_PRESETS,  'hairColour');
+  _buildHairBtns();
+
+  // Height slider
+  const hSlider = document.getElementById('pmHeightSlider');
+  const hVal    = document.getElementById('pmHeightVal');
+  if (hSlider) {
+    const cfg = getLocalCharConfig();
+    hSlider.value = cfg.height;
+    if (hVal) hVal.textContent = Number(cfg.height).toFixed(2) + '×';
+    hSlider.addEventListener('input', () => {
+      const cfg2 = getLocalCharConfig();
+      cfg2.height = parseFloat(hSlider.value);
+      if (hVal) hVal.textContent = cfg2.height.toFixed(2) + '×';
+      saveLocalCharConfig(cfg2);
+      _rebuildAvPreview();
+    });
+  }
+
+  // Avatar reset
+  document.getElementById('pmAvatarReset')?.addEventListener('click', () => {
+    saveLocalCharConfig({ ...DEFAULT_CHAR_CONFIG });
+    _syncAvSwatches();
+    const hSl = document.getElementById('pmHeightSlider');
+    const hV  = document.getElementById('pmHeightVal');
+    if (hSl) hSl.value = DEFAULT_CHAR_CONFIG.height;
+    if (hV)  hV.textContent = DEFAULT_CHAR_CONFIG.height.toFixed(2) + '×';
+    _rebuildAvPreview();
+  });
+
+  _rebuildAvPreview();
+  _syncAvSwatches();
+}
+
+function _buildSwatches(containerId, presets, field) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  presets.forEach(colour => {
+    const btn = document.createElement('button');
+    btn.className = 'pm-av-swatch';
+    btn.style.background = colour;
+    btn.dataset.field  = field;
+    btn.dataset.colour = colour;
+    btn.setAttribute('aria-label', colour);
+    btn.addEventListener('click', () => {
+      const cfg = getLocalCharConfig();
+      cfg[field] = colour;
+      saveLocalCharConfig(cfg);
+      _syncAvSwatches();
+      _rebuildAvPreview();
+    });
+    el.appendChild(btn);
+  });
+}
+
+function _buildHairBtns() {
+  const el = document.getElementById('pmHairBtns');
+  if (!el) return;
+  HAIR_STYLES.forEach(style => {
+    const btn = document.createElement('button');
+    btn.className = 'pm-av-hair-btn';
+    btn.textContent = style;
+    btn.dataset.hair = style;
+    btn.addEventListener('click', () => {
+      const cfg = getLocalCharConfig();
+      cfg.hairStyle = style;
+      saveLocalCharConfig(cfg);
+      document.querySelectorAll('.pm-av-hair-btn').forEach(b =>
+        b.classList.toggle('active', b.dataset.hair === style)
+      );
+      _rebuildAvPreview();
+    });
+    el.appendChild(btn);
+  });
+}
+
+function _syncAvSwatches() {
+  const cfg = getLocalCharConfig();
+  document.querySelectorAll('.pm-av-swatch').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.colour === cfg[btn.dataset.field]);
+  });
+  document.querySelectorAll('.pm-av-hair-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.hair === cfg.hairStyle);
+  });
+}
+
+function _rebuildAvPreview() {
+  if (!_avPrevScene) return;
+  if (_avPrevGroup) _avPrevScene.remove(_avPrevGroup);
+  _avPrevGroup = buildCharacter(getLocalCharConfig());
+  _avPrevScene.add(_avPrevGroup);
+  _renderAvPreview();
+}
+
+function _renderAvPreview() {
+  if (!_avPrevRenderer || !_avPrevScene) return;
+  if (_avPrevGroup) _avPrevGroup.rotation.y += 0.015;
+  _avPrevRenderer.render(_avPrevScene, _avPrevCam);
+}
+
+function _tickAvatarPreview() {
+  if (_avSpinning) return;
+  _avSpinning = true;
+  const tick = () => {
+    const avatarTabVisible = !document.getElementById('pmTabAvatar')?.classList.contains('pm-hidden');
+    if (!isPauseOpen || !avatarTabVisible) { _avSpinning = false; return; }
+    _renderAvPreview();
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
 }
 
 // ============================================================
