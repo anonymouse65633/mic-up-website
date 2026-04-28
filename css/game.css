@@ -106,44 +106,7 @@
 .disc-back { font-size: 16px; color: var(--c-muted); text-decoration: none; }
 .disc-back:hover { color: var(--c-text); }
 
-/* ════════════════════════════════════════════════════════════
-   CLICK-TO-RESUME HINT  (shown after Escape closes the menu)
-   ════════════════════════════════════════════════════════════ */
-.lock-hint {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  background: transparent;
-  animation: lock-hint-fade-in 0.15s ease;
-}
-.lock-hint.hidden { display: none; }
-.lock-hint-inner {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  padding: 18px 32px;
-  background: rgba(0, 0, 0, 0.55);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 10px;
-  backdrop-filter: blur(6px);
-  pointer-events: none;
-}
-.lock-hint-icon { font-size: 28px; }
-.lock-hint-text {
-  font-family: 'Press Start 2P', monospace;
-  font-size: 11px;
-  color: #fff;
-  letter-spacing: 0.05em;
-}
-@keyframes lock-hint-fade-in {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
+/* Pointer-lock overlay removed — click-to-play is gone */
 
 /* ════════════════════════════════════════════════════════════
    CROSSHAIR
@@ -832,4 +795,101 @@
   .pm-panel { width: 100vw; border-radius: 0; min-height: 100dvh; }
   .pm-sub-body { max-height: none; }
   .pm-avatar-wrap { flex-direction: column; }
+}
+
+/* ════════════════════════════════════════════════════════════
+   HOTBAR  (bottom centre — slots 1 & 2)
+   ════════════════════════════════════════════════════════════ */
+
+.hotbar {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: flex;
+  gap: 6px;
+  pointer-events: none;
+  user-select: none;
+}
+
+.hotbar-slot {
+  width: 62px;
+  height: 68px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  background: rgba(13, 13, 26, .78);
+  border: 2px solid var(--c-border);
+  border-radius: var(--radius);
+  backdrop-filter: blur(6px);
+  position: relative;
+  transition:
+    border-color .15s,
+    background   .15s,
+    box-shadow   .15s,
+    transform    .12s;
+}
+
+/* Key-number badge (top-left corner) */
+.hotbar-slot-key {
+  position: absolute;
+  top: 4px;
+  left: 5px;
+  font-family: var(--font-pixel);
+  font-size: 6px;
+  color: var(--c-muted);
+  letter-spacing: 0;
+  transition: color .15s;
+}
+
+/* Tool icon */
+.hotbar-slot-icon {
+  font-size: 24px;
+  line-height: 1;
+  filter: grayscale(35%);
+  transition: filter .15s, transform .15s;
+}
+
+/* Label underneath icon */
+.hotbar-slot-label {
+  font-family: var(--font-pixel);
+  font-size: 5px;
+  color: var(--c-muted);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  transition: color .15s;
+}
+
+/* ── Active / selected slot ── */
+.hotbar-slot.active {
+  border-color: var(--c-accent);
+  background: rgba(0, 245, 196, .10);
+  box-shadow:
+    0 0 0 1px rgba(0, 245, 196, .20),
+    0 0 14px rgba(0, 245, 196, .22),
+    inset 0 0 8px rgba(0, 245, 196, .06);
+  transform: translateY(-3px);
+}
+
+.hotbar-slot.active .hotbar-slot-key {
+  color: var(--c-accent);
+}
+
+.hotbar-slot.active .hotbar-slot-icon {
+  filter: grayscale(0%) drop-shadow(0 0 4px rgba(0,245,196,.45));
+  transform: scale(1.08);
+}
+
+.hotbar-slot.active .hotbar-slot-label {
+  color: var(--c-accent);
+}
+
+/* ── Mobile: slightly smaller ── */
+@media (max-width: 540px) {
+  .hotbar-slot        { width: 52px; height: 58px; }
+  .hotbar-slot-icon   { font-size: 20px; }
+  .hotbar-slot-label  { font-size: 4.5px; }
 }
