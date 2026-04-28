@@ -11,17 +11,23 @@
 </head>
 <body class="game-page">
 
-  <!-- ── Loading overlay ── -->
+  <!-- ══════════════════════════════════════════════════════
+       LOADING OVERLAY
+       ══════════════════════════════════════════════════════ -->
   <div id="loadingOverlay" class="overlay loading-overlay" aria-live="polite">
     <div class="loading-box">
       <div class="load-icon">🌍</div>
       <p class="load-title">Loading World…</p>
-      <div class="load-bar-wrap"><div class="load-bar" id="loadBar"></div></div>
+      <div class="load-bar-wrap">
+        <div class="load-bar" id="loadBar"></div>
+      </div>
       <p class="load-status" id="loadStatus">Connecting…</p>
     </div>
   </div>
 
-  <!-- ── Disconnected overlay ── -->
+  <!-- ══════════════════════════════════════════════════════
+       DISCONNECTED OVERLAY
+       ══════════════════════════════════════════════════════ -->
   <div id="disconnectedOverlay" class="overlay disc-overlay hidden">
     <div class="disc-box">
       <p class="disc-icon">⚠️</p>
@@ -32,7 +38,9 @@
     </div>
   </div>
 
-  <!-- ── Pointer-lock overlay ── -->
+  <!-- ══════════════════════════════════════════════════════
+       POINTER-LOCK OVERLAY
+       ══════════════════════════════════════════════════════ -->
   <div id="lockOverlay" class="lock-overlay hidden">
     <div class="lock-box">
       <p class="lock-icon">🖱️</p>
@@ -41,18 +49,34 @@
     </div>
   </div>
 
-  <!-- ── Game wrapper ── -->
+  <!-- ══════════════════════════════════════════════════════
+       GAME WRAPPER  (hidden until world finishes loading)
+       ══════════════════════════════════════════════════════ -->
   <div id="gameWrapper" class="game-wrapper hidden">
 
+    <!-- ── 3-D canvas ── -->
     <canvas id="gameCanvas" aria-label="3D game world"></canvas>
 
-    <!-- Crosshair -->
+    <!-- ── Crosshair ── -->
     <div class="crosshair" aria-hidden="true">
       <div class="ch-h"></div>
       <div class="ch-v"></div>
     </div>
 
-    <!-- HUD top-left -->
+    <!-- ══════════════════════════════════════════════════
+         CoD-STYLE COMPASS BAR  (top centre)
+         .compass-bar-wrap clips to 320 px and fades edges.
+         #compassCanvas is wider (600 px) so game.js can
+         scroll the degree strip behind the fixed notch.
+         ══════════════════════════════════════════════════ -->
+    <div class="compass-bar-wrap" aria-hidden="true">
+      <canvas id="compassCanvas" width="600" height="32"></canvas>
+      <div class="compass-notch"></div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════
+         HUD — top-left  (player name / pos / zone)
+         ══════════════════════════════════════════════════ -->
     <div class="hud hud-tl" id="hudPlayer">
       <div class="hud-avatar" id="hudAvatar"></div>
       <div class="hud-info">
@@ -62,23 +86,159 @@
       </div>
     </div>
 
-    <!-- HUD top-right -->
+    <!-- ══════════════════════════════════════════════════
+         HUD — top-right  (online count)
+         Sits above the minimap that renderer.js places at
+         top: 70 px, right: 14 px.
+         ══════════════════════════════════════════════════ -->
     <div class="hud hud-tr" id="hudOnline">
       <span class="dot-pulse"></span>
-      <span id="hudCount">0</span> online
+      <span id="hudCount">0</span>&nbsp;online
     </div>
 
-    <!-- HUD bottom-left -->
+    <!-- ══════════════════════════════════════════════════
+         HUD — bottom-left
+         Old round compass kept in DOM (hidden via CSS) so
+         compassDir stays available as a game.js fallback.
+         Icon row is pointer-interactive (settings / char).
+         ══════════════════════════════════════════════════ -->
     <div class="hud-bl">
-      <div class="compass" id="compass">
+
+      <!-- Legacy round compass — hidden by game.css, kept
+           so game.js compassDir fallback still works -->
+      <div class="compass" id="compass" aria-hidden="true">
         <span class="compass-dir" id="compassDir">N</span>
       </div>
-      <div class="controls-hint">
-        WASD · Move &nbsp;|&nbsp; Mouse · Look &nbsp;|&nbsp; Space · Jump &nbsp;|&nbsp; T · Chat
-      </div>
-    </div>
 
-    <!-- Chat -->
+      <!-- Controls hint -->
+      <div class="controls-hint" aria-label="Controls">
+        WASD&nbsp;·&nbsp;Move &nbsp;|&nbsp;
+        Mouse&nbsp;·&nbsp;Look &nbsp;|&nbsp;
+        Space&nbsp;·&nbsp;Jump &nbsp;|&nbsp;
+        T&nbsp;·&nbsp;Chat
+      </div>
+
+      <!-- Icon buttons (settings + character editor) -->
+      <div class="hud-icon-row">
+        <button
+          id="btnSettings"
+          class="hud-icon-btn"
+          title="Settings  (opens/closes with ESC)"
+          aria-label="Open settings"
+        >⚙</button>
+        <button
+          id="btnCharacter"
+          class="hud-icon-btn"
+          title="Character customisation"
+          aria-label="Open character editor"
+        >👤</button>
+      </div>
+
+    </div><!-- /.hud-bl -->
+
+    <!-- ══════════════════════════════════════════════════
+         SETTINGS PANEL
+         Centred modal — toggled by #btnSettings or ESC.
+         game.js reads/writes all values here.
+
+         Sensitivity range:
+           min  0.0005  (very slow, sniper-scope feel)
+           max  0.0080  (fast, competitive feel)
+           step 0.0001
+           default 0.0022
+
+         Key-bind buttons carry [data-bind="<action>"].
+         game.js sets their text to the human-readable key
+         name and adds .sp-listening while waiting for input.
+         ══════════════════════════════════════════════════ -->
+    <div id="settingsPanel" class="hidden" role="dialog" aria-modal="true" aria-label="Settings">
+
+      <div class="sp-header">
+        <span class="sp-title">SETTINGS</span>
+        <button id="spClose" class="sp-close" aria-label="Close settings">✕</button>
+      </div>
+
+      <div class="sp-body">
+
+        <!-- ── Mouse sensitivity ── -->
+        <div class="sp-section">
+          <p class="sp-section-title">MOUSE SENSITIVITY</p>
+          <div class="sp-sens-row">
+            <label for="spSensSlider">Sensitivity</label>
+            <input
+              id="spSensSlider"
+              class="sp-slider"
+              type="range"
+              min="0.0005"
+              max="0.0080"
+              step="0.0001"
+              value="0.0022"
+              aria-label="Mouse sensitivity"
+            />
+            <span id="spSensVal" class="sp-sens-val">0.0022</span>
+          </div>
+        </div>
+
+        <!-- ── Key binds ── -->
+        <div class="sp-section">
+          <p class="sp-section-title">KEY BINDS</p>
+
+          <!-- forward -->
+          <div class="sp-bind-row">
+            <span class="sp-bind-label">Forward</span>
+            <button class="sp-bind-btn" data-bind="forward" aria-label="Rebind forward">W</button>
+          </div>
+
+          <!-- back -->
+          <div class="sp-bind-row">
+            <span class="sp-bind-label">Back</span>
+            <button class="sp-bind-btn" data-bind="back" aria-label="Rebind back">S</button>
+          </div>
+
+          <!-- left -->
+          <div class="sp-bind-row">
+            <span class="sp-bind-label">Left</span>
+            <button class="sp-bind-btn" data-bind="left" aria-label="Rebind left">A</button>
+          </div>
+
+          <!-- right -->
+          <div class="sp-bind-row">
+            <span class="sp-bind-label">Right</span>
+            <button class="sp-bind-btn" data-bind="right" aria-label="Rebind right">D</button>
+          </div>
+
+          <!-- jump -->
+          <div class="sp-bind-row">
+            <span class="sp-bind-label">Jump</span>
+            <button class="sp-bind-btn" data-bind="jump" aria-label="Rebind jump">Space</button>
+          </div>
+
+          <!-- sprint -->
+          <div class="sp-bind-row">
+            <span class="sp-bind-label">Sprint</span>
+            <button class="sp-bind-btn" data-bind="sprint" aria-label="Rebind sprint">Shift</button>
+          </div>
+
+          <!-- chat -->
+          <div class="sp-bind-row">
+            <span class="sp-bind-label">Chat</span>
+            <button class="sp-bind-btn" data-bind="chat" aria-label="Rebind chat">T</button>
+          </div>
+
+        </div><!-- /.sp-section key binds -->
+
+        <!-- ── Reset ── -->
+        <div class="sp-reset-row">
+          <button id="spReset" class="sp-reset-btn">Reset Defaults</button>
+        </div>
+
+      </div><!-- /.sp-body -->
+
+    </div><!-- /#settingsPanel -->
+
+    <!-- ══════════════════════════════════════════════════
+         CHAT
+         ══════════════════════════════════════════════════ -->
     <div class="chat-panel" id="chatPanel" aria-label="Chat">
       <div class="chat-messages" id="chatMessages"></div>
       <form class="chat-form" id="chatForm" autocomplete="off">
@@ -94,9 +254,16 @@
       </form>
     </div>
 
-  </div>
+  </div><!-- /#gameWrapper -->
 
-  <!-- Three.js must load before game modules -->
+  <!-- ══════════════════════════════════════════════════════
+       SCRIPTS
+       Three.js MUST be a plain <script> (not a module) so
+       it lands on window.THREE before the ES modules run.
+       renderer.js is added here even though game.js imports
+       it, because explicit ordering prevents race conditions
+       on some browsers when the module graph is shallow.
+       ══════════════════════════════════════════════════════ -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
   <script type="module" src="js/firebase-config.js"></script>
@@ -104,6 +271,8 @@
   <script type="module" src="js/world.js"></script>
   <script type="module" src="js/objects.js"></script>
   <script type="module" src="js/player.js"></script>
+  <script type="module" src="js/character.js"></script>
+  <script type="module" src="js/renderer.js"></script>
   <script type="module" src="js/game.js"></script>
 
 </body>
