@@ -39,17 +39,6 @@
   </div>
 
   <!-- ══════════════════════════════════════════════════════
-       POINTER-LOCK OVERLAY
-       ══════════════════════════════════════════════════════ -->
-  <div id="lockOverlay" class="lock-overlay hidden">
-    <div class="lock-box">
-      <p class="lock-icon">🖱️</p>
-      <p class="lock-title">Click to Play</p>
-      <p class="lock-sub">Mouse will be captured · ESC to release</p>
-    </div>
-  </div>
-
-  <!-- ══════════════════════════════════════════════════════
        GAME WRAPPER  (hidden until world finishes loading)
        ══════════════════════════════════════════════════════ -->
   <div id="gameWrapper" class="game-wrapper hidden">
@@ -65,9 +54,6 @@
 
     <!-- ══════════════════════════════════════════════════
          CoD-STYLE COMPASS BAR  (top centre)
-         .compass-bar-wrap clips to 320 px and fades edges.
-         #compassCanvas is wider (600 px) so game.js can
-         scroll the degree strip behind the fixed notch.
          ══════════════════════════════════════════════════ -->
     <div class="compass-bar-wrap" aria-hidden="true">
       <canvas id="compassCanvas" width="600" height="32"></canvas>
@@ -75,7 +61,7 @@
     </div>
 
     <!-- ══════════════════════════════════════════════════
-         HUD — top-left  (player name / pos / zone)
+         HUD — top-left
          ══════════════════════════════════════════════════ -->
     <div class="hud hud-tl" id="hudPlayer">
       <div class="hud-avatar" id="hudAvatar"></div>
@@ -87,9 +73,7 @@
     </div>
 
     <!-- ══════════════════════════════════════════════════
-         HUD — top-right  (online count)
-         Sits above the minimap that renderer.js places at
-         top: 70 px, right: 14 px.
+         HUD — top-right
          ══════════════════════════════════════════════════ -->
     <div class="hud hud-tr" id="hudOnline">
       <span class="dot-pulse"></span>
@@ -98,19 +82,11 @@
 
     <!-- ══════════════════════════════════════════════════
          HUD — bottom-left
-         Old round compass kept in DOM (hidden via CSS) so
-         compassDir stays available as a game.js fallback.
-         Icon row is pointer-interactive (settings / char).
          ══════════════════════════════════════════════════ -->
     <div class="hud-bl">
-
-      <!-- Legacy round compass — hidden by game.css, kept
-           so game.js compassDir fallback still works -->
       <div class="compass" id="compass" aria-hidden="true">
         <span class="compass-dir" id="compassDir">N</span>
       </div>
-
-      <!-- Controls hint -->
       <div class="controls-hint" aria-label="Controls">
         WASD&nbsp;·&nbsp;Move &nbsp;|&nbsp;
         Mouse&nbsp;·&nbsp;Look &nbsp;|&nbsp;
@@ -118,182 +94,150 @@
         T&nbsp;·&nbsp;Chat &nbsp;|&nbsp;
         M&nbsp;·&nbsp;Map
       </div>
-
-      <!-- Icon buttons (settings + character editor) -->
       <div class="hud-icon-row">
-        <button
-          id="btnSettings"
-          class="hud-icon-btn"
-          title="Settings  (opens/closes with ESC)"
-          aria-label="Open settings"
-        >⚙</button>
-        <button
-          id="btnCharacter"
-          class="hud-icon-btn"
-          title="Character customisation"
-          aria-label="Open character editor"
-        >👤</button>
+        <button id="btnSettings" class="hud-icon-btn" title="Settings (ESC)" aria-label="Open settings">⚙</button>
+        <button id="btnCharacter" class="hud-icon-btn" title="Character customisation" aria-label="Open character editor">👤</button>
       </div>
-
-    </div><!-- /.hud-bl -->
+    </div>
 
     <!-- ══════════════════════════════════════════════════
          PAUSE MENU  (Roblox-style)
-         Opens / closes with ESC or the ⚙ HUD button.
-         Left sidebar: Settings | Avatar | Resume | Leave
-         Right content: tab panels for each section.
+         Main screen: vertical button list
+         Sub-screens: Settings · Avatar (slide in)
          ══════════════════════════════════════════════════ -->
     <div id="pauseMenu" class="pm-overlay hidden" role="dialog" aria-modal="true" aria-label="Pause menu">
-      <div class="pm-panel">
 
-        <!-- ── Left navigation sidebar ── -->
-        <nav class="pm-nav" aria-label="Menu sections">
-          <div class="pm-brand">WALKWORLD</div>
+      <!-- ── MAIN SCREEN ── -->
+      <div class="pm-panel" id="pmMain">
+        <div class="pm-logo">WALKWORLD</div>
+        <div class="pm-menu-list">
 
-          <button class="pm-nav-btn pm-nav-active" data-pm-tab="settings" aria-selected="true">
-            <span class="pm-nav-icon">⚙</span> Settings
-          </button>
-          <button class="pm-nav-btn" data-pm-tab="avatar" aria-selected="false">
-            <span class="pm-nav-icon">👤</span> Avatar
+          <button id="pmResume" class="pm-item pm-item-resume">
+            <span class="pm-item-icon">▶</span>
+            <span class="pm-item-label">Resume</span>
           </button>
 
-          <div class="pm-nav-spacer" aria-hidden="true"></div>
-
-          <button id="pmResume" class="pm-nav-btn pm-nav-resume" aria-label="Resume game">
-            <span class="pm-nav-icon">▶</span> Resume
+          <button class="pm-item pm-item-nav" data-pm-tab="settings">
+            <span class="pm-item-icon">⚙</span>
+            <span class="pm-item-label">Settings</span>
+            <span class="pm-item-chevron">›</span>
           </button>
-          <button id="pmLeave" class="pm-nav-btn pm-nav-leave" aria-label="Leave to lobby">
-            <span class="pm-nav-icon">🚪</span> Leave Game
+
+          <button class="pm-item pm-item-nav" data-pm-tab="avatar">
+            <span class="pm-item-icon">👤</span>
+            <span class="pm-item-label">Avatar</span>
+            <span class="pm-item-chevron">›</span>
           </button>
-        </nav>
 
-        <!-- ── Right content panel ── -->
-        <div class="pm-content">
+          <button id="pmResetChar" class="pm-item">
+            <span class="pm-item-icon">🔄</span>
+            <span class="pm-item-label">Reset Character</span>
+          </button>
 
-          <!-- ════ SETTINGS TAB ════ -->
-          <div class="pm-tab" id="pmTabSettings" role="tabpanel">
-            <p class="pm-tab-title">SETTINGS</p>
+          <button id="pmJoin" class="pm-item pm-item-soon" disabled>
+            <span class="pm-item-icon">🔗</span>
+            <span class="pm-item-label">Join Friend</span>
+            <span class="pm-item-badge">SOON</span>
+          </button>
 
-            <!-- Mouse sensitivity -->
-            <div class="sp-section">
-              <p class="sp-section-title">MOUSE SENSITIVITY</p>
-              <div class="sp-sens-row">
-                <label for="spSensSlider">Sensitivity</label>
-                <input
-                  id="spSensSlider"
-                  class="sp-slider"
-                  type="range"
-                  min="0.0005"
-                  max="0.0080"
-                  step="0.0001"
-                  value="0.0022"
-                  aria-label="Mouse sensitivity"
-                />
-                <span id="spSensVal" class="sp-sens-val">0.0022</span>
+          <button id="pmLeave" class="pm-item pm-item-leave">
+            <span class="pm-item-icon">🚪</span>
+            <span class="pm-item-label">Leave Game</span>
+          </button>
+
+        </div>
+      </div><!-- /#pmMain -->
+
+      <!-- ── SETTINGS SCREEN ── -->
+      <div class="pm-panel pm-sub pm-hidden" id="pmTabSettings" role="tabpanel">
+        <div class="pm-sub-header">
+          <button class="pm-back-btn" data-pm-back="main">‹ Back</button>
+          <span class="pm-sub-title">SETTINGS</span>
+        </div>
+        <div class="pm-sub-body">
+
+          <div class="sp-section">
+            <p class="sp-section-title">MOUSE SENSITIVITY</p>
+            <div class="sp-sens-row">
+              <label for="spSensSlider">Sensitivity</label>
+              <input id="spSensSlider" class="sp-slider" type="range"
+                     min="0.0005" max="0.0080" step="0.0001" value="0.0022"
+                     aria-label="Mouse sensitivity" />
+              <span id="spSensVal" class="sp-sens-val">0.0022</span>
+            </div>
+          </div>
+
+          <div class="sp-section">
+            <p class="sp-section-title">KEY BINDS</p>
+            <div class="sp-bind-row"><span class="sp-bind-label">Forward</span><button class="sp-bind-btn" data-bind="forward">W</button></div>
+            <div class="sp-bind-row"><span class="sp-bind-label">Back</span><button class="sp-bind-btn" data-bind="back">S</button></div>
+            <div class="sp-bind-row"><span class="sp-bind-label">Left</span><button class="sp-bind-btn" data-bind="left">A</button></div>
+            <div class="sp-bind-row"><span class="sp-bind-label">Right</span><button class="sp-bind-btn" data-bind="right">D</button></div>
+            <div class="sp-bind-row"><span class="sp-bind-label">Jump</span><button class="sp-bind-btn" data-bind="jump">Space</button></div>
+            <div class="sp-bind-row"><span class="sp-bind-label">Sprint</span><button class="sp-bind-btn" data-bind="sprint">Shift</button></div>
+            <div class="sp-bind-row"><span class="sp-bind-label">Chat</span><button class="sp-bind-btn" data-bind="chat">T</button></div>
+            <div class="sp-bind-row"><span class="sp-bind-label">Map</span><button class="sp-bind-btn" data-bind="map">M</button></div>
+          </div>
+
+          <div class="sp-reset-row">
+            <button id="spReset" class="sp-reset-btn">Reset Defaults</button>
+          </div>
+
+        </div>
+      </div><!-- /#pmTabSettings -->
+
+      <!-- ── AVATAR SCREEN ── -->
+      <div class="pm-panel pm-sub pm-hidden" id="pmTabAvatar" role="tabpanel">
+        <div class="pm-sub-header">
+          <button class="pm-back-btn" data-pm-back="main">‹ Back</button>
+          <span class="pm-sub-title">AVATAR</span>
+        </div>
+        <div class="pm-sub-body">
+
+          <div class="pm-avatar-wrap">
+            <div class="pm-avatar-preview">
+              <canvas id="pmPreviewCanvas" width="110" height="160"></canvas>
+            </div>
+            <div class="pm-avatar-controls">
+              <div class="pm-av-section">
+                <p class="pm-av-label">SKIN</p>
+                <div class="pm-av-swatches" id="pmSwatchSkin"></div>
+              </div>
+              <div class="pm-av-section">
+                <p class="pm-av-label">SHIRT</p>
+                <div class="pm-av-swatches" id="pmSwatchShirt"></div>
+              </div>
+              <div class="pm-av-section">
+                <p class="pm-av-label">PANTS</p>
+                <div class="pm-av-swatches" id="pmSwatchPants"></div>
+              </div>
+              <div class="pm-av-section">
+                <p class="pm-av-label">HAIR STYLE</p>
+                <div class="pm-av-hair-row" id="pmHairBtns"></div>
+              </div>
+              <div class="pm-av-section">
+                <p class="pm-av-label">HAIR COLOUR</p>
+                <div class="pm-av-swatches" id="pmSwatchHair"></div>
+              </div>
+              <div class="pm-av-section">
+                <p class="pm-av-label">HEIGHT &nbsp;<span id="pmHeightVal">1.00×</span></p>
+                <div class="sp-sens-row">
+                  <span style="font-size:13px;color:var(--c-muted)">Short</span>
+                  <input id="pmHeightSlider" class="sp-slider" type="range"
+                         min="0.70" max="1.40" step="0.01" value="1.00" />
+                  <span style="font-size:13px;color:var(--c-muted)">Tall</span>
+                </div>
               </div>
             </div>
+          </div>
 
-            <!-- Key binds -->
-            <div class="sp-section">
-              <p class="sp-section-title">KEY BINDS</p>
-              <div class="sp-bind-row">
-                <span class="sp-bind-label">Forward</span>
-                <button class="sp-bind-btn" data-bind="forward">W</button>
-              </div>
-              <div class="sp-bind-row">
-                <span class="sp-bind-label">Back</span>
-                <button class="sp-bind-btn" data-bind="back">S</button>
-              </div>
-              <div class="sp-bind-row">
-                <span class="sp-bind-label">Left</span>
-                <button class="sp-bind-btn" data-bind="left">A</button>
-              </div>
-              <div class="sp-bind-row">
-                <span class="sp-bind-label">Right</span>
-                <button class="sp-bind-btn" data-bind="right">D</button>
-              </div>
-              <div class="sp-bind-row">
-                <span class="sp-bind-label">Jump</span>
-                <button class="sp-bind-btn" data-bind="jump">Space</button>
-              </div>
-              <div class="sp-bind-row">
-                <span class="sp-bind-label">Sprint</span>
-                <button class="sp-bind-btn" data-bind="sprint">Shift</button>
-              </div>
-              <div class="sp-bind-row">
-                <span class="sp-bind-label">Chat</span>
-                <button class="sp-bind-btn" data-bind="chat">T</button>
-              </div>
-              <div class="sp-bind-row">
-                <span class="sp-bind-label">Map</span>
-                <button class="sp-bind-btn" data-bind="map">M</button>
-              </div>
-            </div>
+          <div class="sp-reset-row">
+            <button id="pmAvatarReset" class="sp-reset-btn">Reset Avatar</button>
+          </div>
 
-            <div class="sp-reset-row">
-              <button id="spReset" class="sp-reset-btn">Reset Defaults</button>
-            </div>
-          </div><!-- /#pmTabSettings -->
+        </div>
+      </div><!-- /#pmTabAvatar -->
 
-          <!-- ════ AVATAR TAB ════ -->
-          <div class="pm-tab pm-hidden" id="pmTabAvatar" role="tabpanel">
-            <p class="pm-tab-title">AVATAR</p>
-
-            <div class="pm-avatar-wrap">
-
-              <!-- Mini 3-D preview -->
-              <div class="pm-avatar-preview">
-                <canvas id="pmPreviewCanvas" width="110" height="160"></canvas>
-              </div>
-
-              <!-- Controls -->
-              <div class="pm-avatar-controls">
-
-                <div class="pm-av-section">
-                  <p class="pm-av-label">SKIN</p>
-                  <div class="pm-av-swatches" id="pmSwatchSkin"></div>
-                </div>
-
-                <div class="pm-av-section">
-                  <p class="pm-av-label">SHIRT</p>
-                  <div class="pm-av-swatches" id="pmSwatchShirt"></div>
-                </div>
-
-                <div class="pm-av-section">
-                  <p class="pm-av-label">PANTS</p>
-                  <div class="pm-av-swatches" id="pmSwatchPants"></div>
-                </div>
-
-                <div class="pm-av-section">
-                  <p class="pm-av-label">HAIR STYLE</p>
-                  <div class="pm-av-hair-row" id="pmHairBtns"></div>
-                </div>
-
-                <div class="pm-av-section">
-                  <p class="pm-av-label">HAIR COLOUR</p>
-                  <div class="pm-av-swatches" id="pmSwatchHair"></div>
-                </div>
-
-                <div class="pm-av-section">
-                  <p class="pm-av-label">HEIGHT &nbsp;<span id="pmHeightVal">1.00×</span></p>
-                  <div class="sp-sens-row">
-                    <span style="font-size:13px;color:var(--c-muted)">Short</span>
-                    <input id="pmHeightSlider" class="sp-slider" type="range"
-                           min="0.70" max="1.40" step="0.01" value="1.00" />
-                    <span style="font-size:13px;color:var(--c-muted)">Tall</span>
-                  </div>
-                </div>
-
-              </div><!-- /.pm-avatar-controls -->
-            </div><!-- /.pm-avatar-wrap -->
-
-            <div class="sp-reset-row">
-              <button id="pmAvatarReset" class="sp-reset-btn">Reset Avatar</button>
-            </div>
-          </div><!-- /#pmTabAvatar -->
-
-        </div><!-- /.pm-content -->
-      </div><!-- /.pm-panel -->
     </div><!-- /#pauseMenu -->
 
     <!-- ══════════════════════════════════════════════════
@@ -302,32 +246,24 @@
     <div class="chat-panel" id="chatPanel" aria-label="Chat">
       <div class="chat-messages" id="chatMessages"></div>
       <form class="chat-form" id="chatForm" autocomplete="off">
-        <input
-          id="chatInput"
-          class="chat-input"
-          type="text"
-          maxlength="80"
-          placeholder="Press T to chat…"
-          disabled
-        />
+        <input id="chatInput" class="chat-input" type="text" maxlength="80"
+               placeholder="Press T to chat…" disabled />
         <button class="chat-send" type="submit" aria-label="Send">▶</button>
       </form>
     </div>
 
     <!-- ══════════════════════════════════════════════════
          WORLD MAP OVERLAY  (toggled with M key)
-         Full-screen overlay with a zoomable top-down map.
-         Canvas is sized by game.js when opened.
          ══════════════════════════════════════════════════ -->
     <div id="mapOverlay" class="map-overlay hidden" role="dialog" aria-modal="true" aria-label="World map">
       <div class="map-modal">
         <div class="map-header">
           <span class="map-title">🗺&nbsp; WORLD MAP</span>
           <div class="map-zoom-btns">
-            <button id="mapZoomOut" class="map-zoom-btn" title="Zoom out  (scroll ↓)" aria-label="Zoom out">−</button>
+            <button id="mapZoomOut" class="map-zoom-btn" title="Zoom out (scroll ↓)" aria-label="Zoom out">−</button>
             <span   id="mapZoomDisplay" class="map-zoom-val">1.0×</span>
-            <button id="mapZoomIn"  class="map-zoom-btn" title="Zoom in   (scroll ↑)" aria-label="Zoom in">+</button>
-            <button id="mapClose"   class="map-close-btn" title="Close map  (M / ESC)" aria-label="Close map">✕</button>
+            <button id="mapZoomIn"  class="map-zoom-btn" title="Zoom in (scroll ↑)" aria-label="Zoom in">+</button>
+            <button id="mapClose"   class="map-close-btn" title="Close map (M / ESC)" aria-label="Close map">✕</button>
           </div>
         </div>
         <canvas id="mapCanvas" class="map-canvas"></canvas>
@@ -336,16 +272,7 @@
 
   </div><!-- /#gameWrapper -->
 
-  <!-- ══════════════════════════════════════════════════════
-       SCRIPTS
-       Three.js MUST be a plain <script> (not a module) so
-       it lands on window.THREE before the ES modules run.
-       renderer.js is added here even though game.js imports
-       it, because explicit ordering prevents race conditions
-       on some browsers when the module graph is shallow.
-       ══════════════════════════════════════════════════════ -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-
   <script type="module" src="js/firebase-config.js"></script>
   <script type="module" src="js/network.js"></script>
   <script type="module" src="js/world.js"></script>
