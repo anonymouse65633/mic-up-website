@@ -151,7 +151,7 @@ function buildFlowers() {
   const meshPetals = petalMats.map(m => new THREE.InstancedMesh(GEO.petal, m, MAX_F));
   const meshStems  = new THREE.InstancedMesh(GEO.stemG, MAT.stem, MAX_F * 3);
   let counts = [0, 0, 0], is = 0;
-  const rng = makeRng(0xF10WE500 | 0);
+  const rng = makeRng(0xF10E5A00);
 
   for (let i = 0; i < 600 && counts.every(c => c < MAX_F); i++) {
     const x = (rng() * 2 - 1) * (HALF - 4);
@@ -178,7 +178,7 @@ function buildMushrooms() {
   const meshCap   = new THREE.InstancedMesh(GEO.mCap,   MAT.cap,   MAX_M);
   const meshStalk = new THREE.InstancedMesh(GEO.mStalk, MAT.stalk, MAX_M);
   let im = 0;
-  const rng = makeRng(0xMUSH0000 | 0);
+  const rng = makeRng(0xA4570000);
 
   for (let i = 0; i < 200 && im < MAX_M; i++) {
     const x = (rng() * 2 - 1) * (HALF - 4);
