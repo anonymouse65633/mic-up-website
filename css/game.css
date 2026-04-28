@@ -140,7 +140,7 @@
   z-index: 15;
   pointer-events: none;
   user-select: none;
-  width: 320px;
+  width: 520px;
   overflow: hidden;
   -webkit-mask-image: linear-gradient(to right, transparent 0%, black 15%, black 85%, transparent 100%);
   mask-image: linear-gradient(to right, transparent 0%, black 15%, black 85%, transparent 100%);
@@ -522,12 +522,12 @@
   .hud-tl            { padding: 6px 9px; }
   .chat-panel        { width: calc(100vw - 20px); right: 10px; bottom: 10px; }
   .controls-hint     { display: none; }
-  .compass-bar-wrap  { width: 220px; }
+  .compass-bar-wrap  { width: 340px; }
   #settingsPanel     { max-height: 96dvh; }
 }
 
 @media (max-width: 400px) {
-  .compass-bar-wrap  { width: 170px; }
+  .compass-bar-wrap  { width: 240px; }
   .hud-icon-btn      { width: 30px; height: 30px; font-size: 15px; }
 }
 
