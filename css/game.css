@@ -893,3 +893,311 @@
   .hotbar-slot-icon   { font-size: 20px; }
   .hotbar-slot-label  { font-size: 4.5px; }
 }
+
+/* ════════════════════════════════════════════════════════════
+   MINING SYSTEM STYLES
+   ════════════════════════════════════════════════════════════ */
+
+/* ── Money HUD ── */
+.hud-money {
+  position: absolute;
+  top: 60px;
+  right: 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(13,13,26,0.82);
+  border: 1px solid #ffd700;
+  border-radius: var(--radius);
+  padding: 6px 12px;
+  backdrop-filter: blur(6px);
+  font-family: var(--font-vt), monospace;
+  font-size: 22px;
+  color: #FFD700;
+  text-shadow: 0 0 10px rgba(255,215,0,0.6);
+  z-index: 10;
+  pointer-events: none;
+  user-select: none;
+}
+
+.money-coin {
+  font-size: 18px;
+  animation: coinSpin 3s linear infinite;
+}
+
+@keyframes coinSpin {
+  0%   { transform: rotateY(0deg);   }
+  45%  { transform: rotateY(90deg);  }
+  50%  { transform: rotateY(90deg);  }
+  95%  { transform: rotateY(0deg);   }
+  100% { transform: rotateY(0deg);   }
+}
+
+/* ── Depth panel ── */
+.hud-depth-panel {
+  position: absolute;
+  top: 104px;
+  right: 14px;
+  background: rgba(13,13,26,0.80);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: var(--radius);
+  padding: 5px 10px;
+  font-family: var(--font-vt), monospace;
+  font-size: 17px;
+  color: var(--c-text);
+  z-index: 10;
+  pointer-events: none;
+  user-select: none;
+  backdrop-filter: blur(4px);
+}
+
+/* ── Dig notification popup ── */
+.dig-notif {
+  position: absolute;
+  bottom: 130px;
+  left: 50%;
+  transform: translateX(-50%) translateY(12px);
+  background: rgba(8,8,20,0.93);
+  border: 2px solid rgba(255,255,255,0.18);
+  border-radius: 14px;
+  padding: 10px 22px 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-vt), monospace;
+  font-size: 26px;
+  color: #ffffff;
+  pointer-events: none;
+  user-select: none;
+  z-index: 20;
+  opacity: 0;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  white-space: nowrap;
+  backdrop-filter: blur(8px);
+}
+
+.dig-notif.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.dn-emoji { font-size: 28px; }
+
+.dn-name {
+  font-weight: bold;
+  letter-spacing: 1px;
+}
+
+.dn-earned {
+  font-size: 20px;
+  color: #7fff7f;
+  margin-left: 4px;
+}
+
+.dn-depth {
+  font-size: 16px;
+  color: var(--c-muted);
+  margin-left: 6px;
+}
+
+/* Rarity glow borders */
+.dig-notif.rarity-uncommon { border-color: #CC7733; box-shadow: 0 0 14px rgba(204,119,51,0.5); }
+.dig-notif.rarity-rare      { border-color: #FFD700; box-shadow: 0 0 18px rgba(255,215,0,0.6); }
+.dig-notif.rarity-legendary { border-color: #00CFFF; box-shadow: 0 0 24px rgba(0,207,255,0.7); animation: legendaryPulse 0.6s ease alternate infinite; }
+
+@keyframes legendaryPulse {
+  from { box-shadow: 0 0 16px rgba(0,207,255,0.5); }
+  to   { box-shadow: 0 0 32px rgba(0,207,255,0.9); }
+}
+
+/* ── Dig hint highlight ── */
+.hint-dig {
+  color: #7fff7f;
+  font-weight: bold;
+}
+
+/* ── Mining side panel (depth + layer inside shaft) ── */
+.mining-panel {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(8,8,20,0.88);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  font-family: var(--font-vt), monospace;
+  color: var(--c-text);
+  z-index: 10;
+  pointer-events: none;
+  user-select: none;
+  backdrop-filter: blur(6px);
+  min-width: 90px;
+  text-align: center;
+}
+
+.mp-title { font-size: 14px; color: var(--c-muted); letter-spacing: 2px; margin-bottom: 6px; }
+.mp-depth { font-size: 26px; color: var(--c-accent); }
+.mp-layer { font-size: 18px; margin-top: 4px; }
+
+
+/* ══════════════════════════════════════════════════════════
+   20-MINUTE RESET TIMER  (top-centre HUD)
+   ══════════════════════════════════════════════════════════ */
+.hud-reset-timer {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(8, 8, 20, 0.82);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 8px;
+  padding: 5px 16px;
+  font-family: var(--font-vt), monospace;
+  font-size: 15px;
+  color: #ffffff;
+  letter-spacing: 2px;
+  pointer-events: none;
+  user-select: none;
+  z-index: 12;
+  backdrop-filter: blur(6px);
+  white-space: nowrap;
+  transition: color 0.4s;
+}
+
+/* ── 1-minute warning banner ── */
+.reset-warning {
+  position: absolute;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: rgba(180, 40, 0, 0.92);
+  border: 2px solid #ff6600;
+  border-radius: 10px;
+  padding: 12px 28px;
+  font-family: var(--font-vt), monospace;
+  font-size: 15px;
+  color: #fff;
+  text-align: center;
+  pointer-events: none;
+  user-select: none;
+  z-index: 50;
+  opacity: 0;
+  transition: opacity 0.4s, transform 0.4s;
+  white-space: nowrap;
+  box-shadow: 0 0 30px rgba(255,80,0,0.6);
+}
+.reset-warning.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* ── Full-screen reset overlay ── */
+.reset-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.4s;
+}
+.reset-overlay.visible {
+  opacity: 1;
+  pointer-events: all;
+}
+.reset-overlay-box {
+  background: rgba(10,10,30,0.96);
+  border: 2px solid rgba(255,119,0,0.7);
+  border-radius: 18px;
+  padding: 40px 60px;
+  text-align: center;
+  font-family: var(--font-vt), monospace;
+  color: #fff;
+  box-shadow: 0 0 60px rgba(255,100,0,0.4);
+}
+.reset-overlay-icon  { font-size: 52px; margin-bottom: 14px; animation: spinRock 1.2s linear infinite; }
+.reset-overlay-title { font-size: 26px; color: #ff9944; letter-spacing: 3px; margin-bottom: 8px; }
+.reset-overlay-sub   { font-size: 14px; color: #ccc; letter-spacing: 1px; }
+
+@keyframes spinRock {
+  0%   { transform: rotate(0deg);   }
+  25%  { transform: rotate(-15deg); }
+  75%  { transform: rotate(15deg);  }
+  100% { transform: rotate(0deg);   }
+}
+
+/* ── Dense Ore legendary pulse uses orange for new layer ── */
+.dig-notif.rarity-legendary {
+  border-color: #FF7700;
+  box-shadow: 0 0 24px rgba(255,119,0,0.7);
+  animation: legendaryPulse 0.6s ease alternate infinite;
+}
+@keyframes legendaryPulse {
+  from { box-shadow: 0 0 16px rgba(255,119,0,0.5); }
+  to   { box-shadow: 0 0 32px rgba(255,119,0,0.9); }
+}
+
+/* ── Ore deposit bonus notification extras ── */
+.dig-notif.deposit-hit {
+  border-color: #FF7700 !important;
+}
+.dn-deposit {
+  display: block;
+  font-size: 11px;
+  color: #FF9933;
+  letter-spacing: 1px;
+  margin-top: 2px;
+  font-weight: bold;
+}
+
+/* ══════════════════════════════════════════════════════════
+   ORE RARITY COLOURS & NOTIFICATION STYLES
+   ══════════════════════════════════════════════════════════ */
+
+/* Common ores — subtle warm border */
+.dig-notif.rarity-common   { border-color: #aaaaaa; box-shadow: 0 0 8px rgba(170,170,170,0.3); }
+/* Uncommon — gold shimmer */
+.dig-notif.rarity-uncommon { border-color: #FFCC00; box-shadow: 0 0 14px rgba(255,204,0,0.5); }
+/* Rare — purple glow */
+.dig-notif.rarity-rare     { border-color: #AA44FF; box-shadow: 0 0 18px rgba(170,68,255,0.6); }
+/* Epic — cyan pulse */
+.dig-notif.rarity-epic     { border-color: #88EEFF; box-shadow: 0 0 22px rgba(136,238,255,0.65); animation: epicPulse 0.7s ease alternate infinite; }
+/* Legendary — orange pulse (Void Crystal) */
+.dig-notif.rarity-legendary { border-color: #CC00FF; box-shadow: 0 0 28px rgba(204,0,255,0.75); animation: voidPulse 0.55s ease alternate infinite; }
+
+@keyframes epicPulse {
+  from { box-shadow: 0 0 14px rgba(136,238,255,0.5); }
+  to   { box-shadow: 0 0 32px rgba(136,238,255,0.9); }
+}
+@keyframes voidPulse {
+  from { box-shadow: 0 0 18px rgba(204,0,255,0.5); }
+  to   { box-shadow: 0 0 40px rgba(204,0,255,1.0); border-color: #FF44FF; }
+}
+
+/* "ORE FOUND!" banner shown at top of notification when ore found */
+.dn-ore-label {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 3px;
+  color: #ffee88;
+  margin-bottom: 2px;
+}
+
+/* Ore rarity label badge */
+.dn-label {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 2px;
+  opacity: 0.85;
+  margin-top: 1px;
+}
+
+/* ore-found class — slightly larger notification */
+.dig-notif.ore-found {
+  min-width: 160px;
+  padding: 10px 16px;
+}
