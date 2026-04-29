@@ -71,11 +71,42 @@
     </div>
 
     <!-- ══════════════════════════════════════════════════
-         HUD — top-right
+         HUD — top-right (online + money)
          ══════════════════════════════════════════════════ -->
     <div class="hud hud-tr" id="hudOnline">
       <span class="dot-pulse"></span>
       <span id="hudCount">0</span>&nbsp;online
+    </div>
+
+    <!-- Money HUD -->
+    <div class="hud hud-money" id="hudMoneyPanel">
+      <span class="money-coin">💰</span>
+      <span id="hudMoney">$0</span>
+    </div>
+
+    <!-- Depth / layer indicator (shown only when inside a shaft) -->
+    <div class="hud hud-depth-panel" id="hudDepthPanel" style="display:none">
+      <span id="hudDepth"></span>
+    </div>
+
+    <!-- 20-minute terrain reset countdown -->
+    <div class="hud hud-reset-timer" id="hudResetTimerPanel">
+      <span id="hudResetTimer">⏱ 20:00</span>
+    </div>
+
+    <!-- 1-minute warning banner -->
+    <div id="resetWarning" class="reset-warning">
+      ⚠️ <strong>Terrain resets in 1 minute!</strong> Head back to the Plaza!
+    </div>
+
+    <!-- Full-screen reset overlay -->
+    <div id="resetOverlay" class="reset-overlay">
+      <div class="reset-overlay-box">
+        <div class="reset-overlay-icon">⛏️</div>
+        <div class="reset-overlay-title">Terrain Resetting…</div>
+        <div class="reset-overlay-sub">Generating new ore deposits with AI</div>
+        <div class="reset-overlay-sub" style="margin-top:6px;font-size:0.8em;opacity:0.7">Teleporting to Plaza</div>
+      </div>
     </div>
 
     <!-- ══════════════════════════════════════════════════
@@ -88,10 +119,10 @@
       <div class="controls-hint" aria-label="Controls">
         WASD&nbsp;·&nbsp;Move &nbsp;|&nbsp;
         Mouse&nbsp;·&nbsp;Look &nbsp;|&nbsp;
-        Space&nbsp;·&nbsp;Jump &nbsp;|&nbsp;
+        Space&nbsp;·&nbsp;Jump&nbsp;/&nbsp;Climb &nbsp;|&nbsp;
+        <span class="hint-dig">E&nbsp;·&nbsp;Dig ⛏</span> &nbsp;|&nbsp;
         T&nbsp;·&nbsp;Chat &nbsp;|&nbsp;
-        M&nbsp;·&nbsp;Map &nbsp;|&nbsp;
-        1/2&nbsp;·&nbsp;Item
+        M&nbsp;·&nbsp;Map
       </div>
       <div class="hud-icon-row">
         <button id="btnSettings" class="hud-icon-btn" title="Settings (ESC)" aria-label="Open settings">⚙</button>
@@ -286,6 +317,18 @@
       </div>
     </div>
 
+    <!-- ══════════════════════════════════════════════════
+         DIG NOTIFICATION  (pops up when you mine something)
+         ══════════════════════════════════════════════════ -->
+    <div id="digNotif" class="dig-notif" aria-live="polite"></div>
+
+    <!-- Mining depth side panel (shows current layer) -->
+    <div id="miningPanel" class="mining-panel hidden">
+      <div class="mp-title">⛏ MINING</div>
+      <div id="mpDepth" class="mp-depth">0.0m</div>
+      <div id="mpLayer" class="mp-layer">Surface</div>
+    </div>
+
   </div><!-- /#gameWrapper -->
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -296,6 +339,8 @@
   <script type="module" src="js/player.js"></script>
   <script type="module" src="js/character.js"></script>
   <script type="module" src="js/renderer.js"></script>
+  <script type="module" src="js/layers.js"></script>
+  <script type="module" src="js/mining.js"></script>
   <script type="module" src="js/game.js"></script>
 
   <!-- ── Hotbar slot switching (1 / 2 keys) ── -->
@@ -327,6 +372,7 @@
       });
     })();
   </script>
+
 
 
 </body></html>
