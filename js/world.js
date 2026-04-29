@@ -1,5 +1,5 @@
 // ============================================================
-//  WalkWorld 3D — world.js
+//  WalkWorld 3D — world.js  (with mining shaft system)
 // ============================================================
 
 export const WORLD_SIZE = 200;
@@ -14,6 +14,26 @@ const HSTEP = WORLD_SIZE / SEGS;
 
 let _hmap = null;
 
+// ============================================================
+//  MINING SHAFT SYSTEM
+// ============================================================
+export const MINE_CELL     = 3.0;   // shaft width in world units
+export const DIG_PER_PUNCH = 1.2;   // depth per punch
+export const MAX_DIG_DEPTH = 120;   // max shaft depth
+
+const _shafts = new Map();          // "cx,cz" -> { surfaceY, floorY, depth }
+let _terrainPosAttr = null;
+let _terrainGeo     = null;
+let _originalY      = null;         // backup of all vertex Y values for reset
+
+function _shaftCX(x) { return Math.round(x / MINE_CELL); }
+function _shaftCZ(z) { return Math.round(z / MINE_CELL); }
+function _shaftKey(cx, cz) { return cx + ',' + cz; }
+
+function _getShaftAt(x, z) {
+  return _shafts.get(_shaftKey(_shaftCX(x), _shaftCZ(z))) ?? null;
+}
+
 function makeRng(seed) {
   let s = seed >>> 0;
   return () => {
@@ -24,9 +44,9 @@ function makeRng(seed) {
 
 export function getZoneName(x, z) {
   if (x < -25 && z < 18)                      return 'Forest';
-  if (x > 40  && z > 16)                      return 'Lake';
-  if (x > 30  && z < -30)                     return 'Cabin';
-  if (Math.abs(x) <= 22 && Math.abs(z) <= 18) return 'Plaza';
+  if (x > 40  && z > 16)                       return 'Lake';
+  if (x > 30  && z < -30)                      return 'Cabin';
+  if (Math.abs(x) <= 22 && Math.abs(z) <= 18)  return 'Plaza';
   return 'Plains';
 }
 
@@ -64,7 +84,7 @@ function _buildHeightmap() {
   }
 }
 
-export function getHeightAt(x, z) {
+function _bilinearHeight(x, z) {
   if (!_hmap) return 0;
   const fx = (x + HALF) / HSTEP;
   const fz = (z + HALF) / HSTEP;
@@ -79,10 +99,90 @@ export function getHeightAt(x, z) {
   return h00*(1-tx)*(1-tz) + h10*tx*(1-tz) + h01*(1-tx)*tz + h11*tx*tz;
 }
 
+/** Surface height without shaft overrides (used by player jump calc). */
+export function getBaseHeightAt(x, z) {
+  return _bilinearHeight(x, z);
+}
+
+/** Height at (x,z) — returns shaft floor if inside a dug shaft. */
+export function getHeightAt(x, z) {
+  const shaft = _getShaftAt(x, z);
+  if (shaft) return shaft.floorY;
+  return _bilinearHeight(x, z);
+}
+
 export function isBlocked(x, z) {
   if (Math.abs(x) >= HALF - 1.5) return true;
   if (Math.abs(z) >= HALF - 1.5) return true;
   return getZoneName(x, z) === 'Lake';
+}
+
+/**
+ * Dig one punch deeper at world position (x, z).
+ * Returns dig info object, or null if at max depth or invalid.
+ */
+export function digShaft(x, z) {
+  const cx = _shaftCX(x);
+  const cz = _shaftCZ(z);
+  const key = _shaftKey(cx, cz);
+
+  const worldX = cx * MINE_CELL;
+  const worldZ = cz * MINE_CELL;
+
+  // ── Plaza is indestructible — no digging allowed ──────────
+  if (getZoneName(worldX, worldZ) === 'Plaza') return null;
+
+  const surfaceY      = _bilinearHeight(worldX, worldZ);
+  const existing      = _shafts.get(key);
+  const currentFloorY = existing ? existing.floorY : surfaceY;
+  const newFloorY     = currentFloorY - DIG_PER_PUNCH;
+  const depth         = surfaceY - newFloorY;
+
+  if (depth > MAX_DIG_DEPTH) return null;
+
+  _shafts.set(key, { surfaceY, floorY: newFloorY, depth });
+  _excavateTerrainAt(cx, cz, newFloorY);
+
+  return { key, cellX: cx, cellZ: cz, worldX, worldZ, surfaceY, floorY: newFloorY, depth };
+}
+
+/** Returns shaft info for the cell containing (x, z), or null. */
+export function getShaftAt(x, z) {
+  return _getShaftAt(x, z);
+}
+
+/** Clear all shaft data (call before resetTerrain). */
+export function clearShafts() {
+  _shafts.clear();
+}
+
+/**
+ * Restore the terrain mesh to its original un-dug state.
+ * Call this together with clearShafts() and resetMining() for the 20-min reset.
+ */
+export function resetTerrain() {
+  if (!_terrainPosAttr || !_originalY) return;
+  clearShafts();
+  for (let i = 0; i < _terrainPosAttr.count; i++) {
+    _terrainPosAttr.setY(i, _originalY[i]);
+  }
+  _terrainPosAttr.needsUpdate = true;
+  _terrainGeo.computeVertexNormals();
+}
+
+function _excavateTerrainAt(cx, cz, floorY) {
+  if (!_terrainPosAttr || !_terrainGeo) return;
+  for (let i = 0; i < _terrainPosAttr.count; i++) {
+    const vx = _terrainPosAttr.getX(i);
+    const vz = _terrainPosAttr.getZ(i);
+    if (_shaftCX(vx) === cx && _shaftCZ(vz) === cz) {
+      if (_terrainPosAttr.getY(i) > floorY) {
+        _terrainPosAttr.setY(i, floorY);
+      }
+    }
+  }
+  _terrainPosAttr.needsUpdate = true;
+  _terrainGeo.computeVertexNormals();
 }
 
 function _terrainColour(x, z, h) {
@@ -131,7 +231,19 @@ export function initWorld() {
   posAttr.needsUpdate = true;
   geoT.computeVertexNormals();
   geoT.setAttribute('color', new THREE.BufferAttribute(colBuf, 3));
-  scene.add(new THREE.Mesh(geoT, new THREE.MeshLambertMaterial({ vertexColors: true })));
+
+  const terrainMesh = new THREE.Mesh(geoT, new THREE.MeshLambertMaterial({ vertexColors: true }));
+  scene.add(terrainMesh);
+
+  // Store refs for dynamic shaft excavation
+  _terrainPosAttr = posAttr;
+  _terrainGeo     = geoT;
+
+  // Snapshot original vertex Y positions so resetTerrain() can restore them
+  _originalY = new Float32Array(posAttr.count);
+  for (let i = 0; i < posAttr.count; i++) {
+    _originalY[i] = posAttr.getY(i);
+  }
 
   const waterMat = new THREE.MeshLambertMaterial({ color: 0x1a6bbf, transparent: true, opacity: 0.80 });
   _addWater(60, 50, 44, 36, waterMat);
