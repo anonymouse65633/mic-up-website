@@ -29,7 +29,9 @@ import {
   sendChat,
   onChat,
 } from './network.js';
-import { onDig, getMoney, getDepthAt, getMaterialAtDepth, ORES, rollOre, resetMining, generateOreDeposits } from './mining.js';
+import { onDig, getMoney, addMoney, getDepthAt, getMaterialAtDepth, ORES, rollOre, resetMining, generateOreDeposits } from './mining.js';
+import { playerInventory, TOOLS } from './inventory.js';
+import { openShop, closeShop, isShopOpen, getNearestShop, setMoneyChangeCallback, SHOPS } from './shop.js';
 import {
   buildCharacter,
   getLocalCharConfig,
@@ -136,14 +138,22 @@ let rafId         = null;
 let isChatOpen    = false;
 let isPauseOpen   = false;
 let isMapOpen     = false;
+let isInventoryOpen = false;
 
 let _lastPosSend = 0;
 const POS_INTERVAL = 100; // ms between Firebase position writes (~10 Hz)
 
 // ── Mining state ─────────────────────────────────────────────
 let _lastDigTime = 0;
-const DIG_COOLDOWN = 550; // ms between digs
+const BASE_DIG_COOLDOWN = 550; // ms at digSpeed 1.0
 let _digNotifTimer = null;
+let _nearestShop   = null;
+
+function _getDigCooldown() {
+  const tool = playerInventory.getActiveTool();
+  if (!tool || tool.digSpeed <= 0) return BASE_DIG_COOLDOWN;
+  return Math.max(100, BASE_DIG_COOLDOWN / tool.digSpeed);
+}
 
 // ── 20-minute reset timer ────────────────────────────────────
 const RESET_DURATION  = 20 * 60;   // 20 minutes in seconds
@@ -246,6 +256,9 @@ async function init() {
   setupChat(name, colour);
   setupPointerLock();
   setupPauseMenu();
+  setupHotbar();
+  setupInventory();
+  setupShop();
   buildMinimapCache();
   buildMapWorldCanvas();
   setupMap();
@@ -305,6 +318,9 @@ function gameLoop(timestamp) {
   updateCompass();
   updateMinimap();
   if (isMapOpen) drawMap();
+
+  // Shop proximity check
+  _updateShopProximity(player.x, player.z);
 
   // 20-minute countdown tick
   _tickResetTimer(timestamp);
@@ -841,7 +857,178 @@ function drawMap() {
   ctx.fillText('M · Close  |  Scroll · Zoom', W - 10, 10);
 }
 
+// ============================================================
+//  HOTBAR  (9 slots, Part 1)
+// ============================================================
+function setupHotbar() {
+  _refreshAllHotbarSlots();
+
+  // Number keys 1-9
+  window.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (isShopOpen() || isInventoryOpen) return;
+    const n = parseInt(e.key);
+    if (n >= 1 && n <= 9) _selectHotbarSlot(n - 1);
+  });
+
+  // Listen for hotbar-changed (after buying a tool from shop)
+  window.addEventListener('hotbar-changed', () => _refreshAllHotbarSlots());
+}
+
+function _selectHotbarSlot(idx) {
+  const prev = playerInventory.activeSlot;
+  playerInventory.activeSlot = idx;
+
+  // Update CSS active class
+  const prevEl = document.getElementById(`hotbarSlot${prev + 1}`);
+  const nextEl = document.getElementById(`hotbarSlot${idx + 1}`);
+  prevEl?.classList.remove('active');
+  nextEl?.classList.add('active');
+
+  // Show item name tooltip
+  const tool = playerInventory.getActiveTool();
+  const nameEl = document.getElementById('hotbarItemName');
+  if (nameEl) {
+    nameEl.textContent = tool ? tool.name : '';
+    nameEl.classList.toggle('visible', !!tool);
+    clearTimeout(nameEl._timer);
+    if (tool) nameEl._timer = setTimeout(() => nameEl.classList.remove('visible'), 2000);
+  }
+
+  // Keep window.HOTBAR_SLOT for backwards compat
+  window.HOTBAR_SLOT = String(idx + 1);
+}
+
+function _refreshHotbarSlot(idx) {
+  const slotEl = document.getElementById(`hotbarSlot${idx + 1}`);
+  if (!slotEl) return;
+  const entry = playerInventory.hotbar[idx];
+
+  const iconEl  = slotEl.querySelector('.hotbar-slot-icon');
+  const labelEl = slotEl.querySelector('.hotbar-slot-label');
+  const durBar  = slotEl.querySelector('.hotbar-dur-bar');
+  const durFill = slotEl.querySelector('.hotbar-dur-fill');
+
+  if (entry && entry.tool) {
+    if (iconEl)  iconEl.textContent  = entry.tool.emoji;
+    if (labelEl) labelEl.textContent = entry.tool.name.replace(' Shovel', '').replace(' Pickaxe', '');
+    slotEl.classList.toggle('broken', entry.durLeft === 0);
+
+    // Durability bar
+    if (durBar && entry.tool.durability < 9999) {
+      durBar.style.display = '';
+      const frac = entry.durLeft / entry.tool.durability;
+      if (durFill) {
+        durFill.style.width = `${(frac * 100).toFixed(1)}%`;
+        durFill.className = 'hotbar-dur-fill' + (frac < 0.2 ? ' low' : frac < 0.5 ? ' med' : '');
+      }
+    } else if (durBar) {
+      durBar.style.display = 'none';
+    }
+  } else {
+    if (iconEl)  iconEl.textContent  = '';
+    if (labelEl) labelEl.textContent = '';
+    if (durBar)  durBar.style.display = 'none';
+  }
+}
+
+function _refreshAllHotbarSlots() {
+  for (let i = 0; i < 9; i++) _refreshHotbarSlot(i);
+}
+
+// ============================================================
+//  INVENTORY OVERLAY  (Part 3)
+// ============================================================
+function setupInventory() {
+  document.getElementById('invCloseBtn')?.addEventListener('click', closeInventory);
+
+  // Tab key also opens inventory
+  window.addEventListener('keydown', e => {
+    if (e.code === 'Tab' && !isChatOpen && !isPauseOpen) {
+      e.preventDefault();
+      isInventoryOpen ? closeInventory() : openInventory();
+    }
+  });
+
+  window.addEventListener('inventory-changed', () => {
+    if (isInventoryOpen) _renderInventoryGrid();
+    _updateInvCapacityUI();
+  });
+}
+
+function openInventory() {
+  isInventoryOpen = true;
+  document.getElementById('inventoryOverlay')?.classList.remove('hidden');
+  _renderInventoryGrid();
+  _updateInvCapacityUI();
+}
+
+function closeInventory() {
+  isInventoryOpen = false;
+  document.getElementById('inventoryOverlay')?.classList.add('hidden');
+}
+
+function _renderInventoryGrid() {
+  const grid = document.getElementById('invGrid');
+  if (!grid) return;
+  grid.innerHTML = '';
+
+  for (let i = 0; i < playerInventory.capacity; i++) {
+    const slot = playerInventory.slots[i];
+    const el   = document.createElement('div');
+    el.className = 'inv-slot';
+    if (slot) {
+      el.innerHTML = `
+        <span>${slot.emoji || '📦'}</span>
+        <span class="inv-slot-count">${slot.count}</span>
+        <span class="inv-slot-name">${slot.name}</span>`;
+    }
+    grid.appendChild(el);
+  }
+}
+
+function _updateInvCapacityUI() {
+  const total = playerInventory.totalItems();
+  const cap   = playerInventory.capacity;
+  const el    = document.getElementById('invCapacity');
+  if (el) el.textContent = `${total} / ${cap * 64} items`;
+}
+
+// ============================================================
+//  SHOP SYSTEM  (Part 4)
+// ============================================================
+function setupShop() {
+  document.getElementById('shopCloseBtn')?.addEventListener('click', closeShop);
+
+  setMoneyChangeCallback(money => _updateMoneyHUD(money));
+
+}
+
+function _updateShopProximity(px, pz) {
+  const nearest = getNearestShop(px, pz);
+  if (nearest !== _nearestShop) {
+    _nearestShop = nearest;
+    const hint = document.getElementById('shopHint');
+    const text = document.getElementById('shopHintText');
+    if (hint) {
+      if (nearest) {
+        const shop = SHOPS[nearest];
+        if (text) text.innerHTML = `${shop.name} — Press <kbd>E</kbd> to open`;
+        hint.classList.remove('hidden');
+      } else {
+        hint.classList.add('hidden');
+      }
+    }
+  }
+}
+
+function _updateMoneyHUD(money) {
+  const el = document.getElementById('hudMoney');
+  if (el) el.textContent = `$${money.toLocaleString()}`;
+}
+
 function setupMap() {
+
   document.getElementById('mapClose')?.addEventListener('click', closeMap);
 
   document.getElementById('mapZoomIn')?.addEventListener('click', () => {
@@ -903,17 +1090,57 @@ function setupChat(name, colour) {
       return;
     }
 
-    // ── Dig / mine (E key) ────────────────────────────────────
-    if (e.code === 'KeyE' && !isChatOpen && !isPauseOpen && isPointerLocked()) {
+    // ── Inventory toggle (I key) ──────────────────────────────
+    if (e.code === 'KeyI' && !isChatOpen && !isPauseOpen) {
       e.preventDefault();
+      isInventoryOpen ? closeInventory() : openInventory();
+      return;
+    }
+
+    // ── E key: open nearby shop OR dig ───────────────────────
+    if (e.code === 'KeyE' && !isChatOpen && !isPauseOpen) {
+      e.preventDefault();
+
+      // If a shop is nearby, open it instead of digging
+      if (_nearestShop && !isShopOpen() && !isInventoryOpen) {
+        openShop(_nearestShop);
+        return;
+      }
+
+      // Close shop/inventory on E if open
+      if (isShopOpen()) { closeShop(); return; }
+      if (isInventoryOpen) { closeInventory(); return; }
+
+      // Dig (only when pointer locked)
+      if (!isPointerLocked()) return;
+
       const now = performance.now();
-      if (now - _lastDigTime >= DIG_COOLDOWN) {
+      if (now - _lastDigTime >= _getDigCooldown()) {
         _lastDigTime = now;
+
+        // Check if active tool is broken
+        if (playerInventory.isActiveBroken()) {
+          _showDigNotif('broken');
+          return;
+        }
+
         const digResult = onDig(player.x, player.z);
         if (digResult) {
+          // Collect item into inventory
+          const itemId = digResult.ore ? digResult.ore.id : digResult.layer.name;
+          const itemName = digResult.ore ? digResult.ore.name : digResult.layer.name;
+          const collected = playerInventory.addItem(itemId, itemName);
+          if (!collected) digResult.bagFull = true;
+
+          // Damage active tool
+          const broke = playerInventory.damageTool(1);
+          if (broke) digResult.toolBroke = true;
+
           _showDigNotif(digResult);
+          _refreshHotbarSlot(playerInventory.activeSlot);
+          _updateInvCapacityUI();
+          _updateMoneyHUD(getMoney());
         } else {
-          // Distinguish Plaza block (indestructible) from max-depth
           _showDigNotif(getZoneName(player.x, player.z) === 'Plaza' ? null : 'maxdepth');
         }
       }
@@ -928,12 +1155,11 @@ function setupChat(name, colour) {
 
     if (e.code === 'Escape') {
       e.preventDefault();
-      if (isMapOpen)   { closeMap();       return; }
-      if (isChatOpen)  { closeChat();      return; }
-      if (isPauseOpen) { closePauseMenu(true); return; }
-      // Always open the menu on ESC — whether pointer is locked or not.
-      // (Previously this only opened when !isPointerLocked(), which caused the
-      // menu to not open when Chrome released the lock before the keydown fired.)
+      if (isShopOpen())    { closeShop();         return; }
+      if (isInventoryOpen) { closeInventory();     return; }
+      if (isMapOpen)       { closeMap();           return; }
+      if (isChatOpen)      { closeChat();          return; }
+      if (isPauseOpen)     { closePauseMenu(true); return; }
       openPauseMenu();
       return;
     }
@@ -1335,7 +1561,6 @@ function _showDigNotif(result) {
   if (!el) return;
 
   if (!result) {
-    // null = Plaza (indestructible) or max depth
     el.innerHTML = '<span style="color:#ff9944">🏛 This ground cannot be dug!</span>';
     el.className = 'dig-notif visible';
     clearTimeout(_digNotifTimer);
@@ -1351,30 +1576,37 @@ function _showDigNotif(result) {
     return;
   }
 
-  const { layer, ore, depth, earned, isDeposit } = result;
+  if (result === 'broken') {
+    el.innerHTML = '<span style="color:#ff4444">🔨 Tool is broken! Buy a new one.</span>';
+    el.className = 'dig-notif visible';
+    clearTimeout(_digNotifTimer);
+    _digNotifTimer = setTimeout(() => { el.className = 'dig-notif'; }, 2200);
+    return;
+  }
 
-  // If an ore was found, show it prominently; otherwise show the layer
+  const { layer, ore, depth, earned, isDeposit, bagFull, toolBroke } = result;
+
   const displayItem  = ore || layer;
   const rarityClass  = 'rarity-' + displayItem.rarity;
   const depositTag   = isDeposit ? '<span class="dn-deposit">💥 ORE DEPOSIT ×3</span>' : '';
+  const bagTag       = bagFull   ? '<span style="color:#ff9944">🎒 Bag full!</span>' : '';
+  const brokeTag     = toolBroke ? '<span style="color:#ff4444">🔨 Tool broke!</span>' : '';
 
   if (ore) {
-    // ── Ore find ────────────────────────────────────────────
     el.innerHTML =
       '<span class="dn-ore-label">ORE FOUND!</span>' +
       '<span class="dn-emoji">' + ore.emoji + '</span>' +
       '<span class="dn-name ' + rarityClass + '" style="color:' + ore.hexColor + '">' + ore.name + '</span>' +
       '<span class="dn-label" style="color:' + ore.hexColor + '">' + ore.label + '</span>' +
-      depositTag +
+      depositTag + bagTag + brokeTag +
       '<span class="dn-earned">+$' + earned + '</span>' +
       '<span class="dn-depth">' + depth.toFixed(1) + 'm · ' + layer.name + '</span>';
     el.className = 'dig-notif visible ore-found ' + rarityClass + (isDeposit ? ' deposit-hit' : '');
   } else {
-    // ── Plain layer dig ──────────────────────────────────────
     el.innerHTML =
       '<span class="dn-emoji">' + layer.emoji + '</span>' +
       '<span class="dn-name" style="color:' + layer.hexColor + '">' + layer.name + '</span>' +
-      depositTag +
+      depositTag + bagTag + brokeTag +
       '<span class="dn-earned">+$' + earned + '</span>' +
       '<span class="dn-depth">' + depth.toFixed(1) + 'm deep</span>';
     el.className = 'dig-notif visible ' + (isDeposit ? 'deposit-hit' : '');
