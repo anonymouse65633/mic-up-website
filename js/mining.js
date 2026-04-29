@@ -106,7 +106,8 @@ let _money = 0;
 
 const _shaftMeshes = new Map(); // shaft key -> { floorMesh, wallGroup }
 
-export function getMoney() { return _money; }
+export function getMoney()        { return _money; }
+export function addMoney(amount)  { _money = Math.max(0, _money + amount); }
 
 export function getDepthAt(x, z) {
   const shaft = getShaftAt(x, z);
