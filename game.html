@@ -1,109 +1,442 @@
 <html lang="en"><head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WalkWorld 3D — Multiplayer</title>
+  <title>WalkWorld 3D — Playing</title>
   <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/game.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&amp;family=VT323:wght@400&amp;display=swap" rel="stylesheet">
 </head>
-<body class="login-page">
+<body class="game-page">
 
-  <div class="bg-grid"></div>
-  <div class="floating-pixels" aria-hidden="true">
-    <span></span><span></span><span></span><span></span>
-    <span></span><span></span><span></span><span></span>
+  <!-- ══════════════════════════════════════════════════════
+       LOADING OVERLAY
+       ══════════════════════════════════════════════════════ -->
+  <div id="loadingOverlay" class="overlay loading-overlay" aria-live="polite">
+    <div class="loading-box">
+      <div class="load-icon">🌍</div>
+      <p class="load-title">Loading World…</p>
+      <div class="load-bar-wrap">
+        <div class="load-bar" id="loadBar"></div>
+      </div>
+      <p class="load-status" id="loadStatus">Connecting…</p>
+    </div>
   </div>
 
-  <main class="login-container">
-    <div class="login-card">
+  <!-- ══════════════════════════════════════════════════════
+       DISCONNECTED OVERLAY
+       ══════════════════════════════════════════════════════ -->
+  <div id="disconnectedOverlay" class="overlay disc-overlay hidden">
+    <div class="disc-box">
+      <p class="disc-icon">⚠️</p>
+      <p class="disc-title">Disconnected</p>
+      <p class="disc-msg">Lost connection to server.</p>
+      <button class="disc-btn" onclick="window.location.reload()">RECONNECT</button>
+      <a class="disc-back" href="index.html">← Back to lobby</a>
+    </div>
+  </div>
 
-      <div class="logo-block">
-        <div class="logo-icon">🌍</div>
-        <h1 class="logo-title">WalkWorld 3D</h1>
-        <p class="logo-sub">Multiplayer · 3D · Free</p>
-      </div>
+  <!-- ══════════════════════════════════════════════════════
+       GAME WRAPPER  (hidden until world finishes loading)
+       ══════════════════════════════════════════════════════ -->
+  <div id="gameWrapper" class="game-wrapper hidden">
 
-      <div class="login-form">
-        <label class="field-label" for="playerName">YOUR NAME</label>
-        <input id="playerName" class="name-input" type="text" maxlength="16" placeholder="Enter name..." autocomplete="off" spellcheck="false">
-        <div class="char-count"><span id="charCount">0</span>/16</div>
+    <!-- ── 3-D canvas ── -->
+    <canvas id="gameCanvas" aria-label="3D game world"></canvas>
 
-        <label class="field-label" for="colorPicker">PICK COLOUR</label>
-        <div class="color-row" id="colorPicker" role="group" aria-label="Pick a player colour"></div>
-
-        <button class="join-btn" id="joinBtn" disabled="">
-          <span class="btn-text">ENTER WORLD</span>
-          <span class="btn-arrow">▶</span>
-        </button>
-
-        <p class="online-count">
-          <span class="dot-pulse"></span>
-          <span id="onlineCount">—</span> players online
-        </p>
-      </div>
-
+    <!-- ── Crosshair ── -->
+    <div class="crosshair" aria-hidden="true">
+      <div class="ch-h"></div>
+      <div class="ch-v"></div>
     </div>
 
-    <div class="howto-card">
-      <h2 class="howto-title">HOW TO PLAY</h2>
-      <ul class="howto-list">
-        <li><kbd>W A S D</kbd> to move</li>
-        <li><kbd>Mouse</kbd> to look around</li>
-        <li><kbd>Space</kbd> to jump</li>
-        <li><kbd>T</kbd> to chat &nbsp;·&nbsp; <kbd>ESC</kbd> to unlock mouse</li>
-      </ul>
+    <!-- ══════════════════════════════════════════════════
+         CoD-STYLE COMPASS BAR  (top centre)
+         ══════════════════════════════════════════════════ -->
+    <div class="compass-bar-wrap" aria-hidden="true">
+      <canvas id="compassCanvas" width="960" height="32"></canvas>
+      <div class="compass-notch"></div>
     </div>
-  </main>
 
-  <script src="js/firebase-config.js" type="module"></script>
-  <script type="module">
-    import { getPlayerCount } from './js/network.js';
+    <!-- ══════════════════════════════════════════════════
+         HUD — top-left
+         ══════════════════════════════════════════════════ -->
+    <div class="hud hud-tl" id="hudPlayer">
+      <div class="hud-avatar" id="hudAvatar"></div>
+      <div class="hud-info">
+        <span class="hud-name" id="hudName">—</span>
+        <span class="hud-pos" id="hudPos">0, 0, 0</span>
+        <span class="hud-zone" id="hudZone">Plains</span>
+      </div>
+    </div>
 
-    const nameInput = document.getElementById('playerName');
-    const charCount = document.getElementById('charCount');
-    const joinBtn   = document.getElementById('joinBtn');
-    const countEl   = document.getElementById('onlineCount');
+    <!-- ══════════════════════════════════════════════════
+         HUD — top-right (online + money)
+         ══════════════════════════════════════════════════ -->
+    <div class="hud hud-tr" id="hudOnline">
+      <span class="dot-pulse"></span>
+      <span id="hudCount">0</span>&nbsp;online
+    </div>
 
-    const COLOURS = ['#ff4757','#ffa502','#eccc68','#2ed573','#1e90ff','#a29bfe','#fd79a8','#ffffff'];
-    let selectedColour = COLOURS[Math.floor(Math.random() * COLOURS.length)];
-    const picker = document.getElementById('colorPicker');
+    <!-- Money HUD -->
+    <div class="hud hud-money" id="hudMoneyPanel">
+      <span class="money-coin">💰</span>
+      <span id="hudMoney">$0</span>
+    </div>
 
-    COLOURS.forEach(c => {
-      const btn = document.createElement('button');
-      btn.className = 'swatch' + (c === selectedColour ? ' active' : '');
-      btn.style.setProperty('--sw', c);
-      btn.setAttribute('aria-label', c);
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.swatch').forEach(s => s.classList.remove('active'));
-        btn.classList.add('active');
-        selectedColour = c;
-      });
-      picker.appendChild(btn);
-    });
+    <!-- Depth / layer indicator (shown only when inside a shaft) -->
+    <div class="hud hud-depth-panel" id="hudDepthPanel" style="display:none">
+      <span id="hudDepth"></span>
+    </div>
 
-    nameInput.addEventListener('input', () => {
-      charCount.textContent = nameInput.value.length;
-      joinBtn.disabled = nameInput.value.trim().length < 1;
-    });
+    <!-- 20-minute terrain reset countdown -->
+    <div class="hud hud-reset-timer" id="hudResetTimerPanel">
+      <span id="hudResetTimer">⏱ 20:00</span>
+    </div>
 
-    nameInput.addEventListener('keydown', e => {
-      if (e.key === 'Enter' && !joinBtn.disabled) joinBtn.click();
-    });
+    <!-- 1-minute warning banner -->
+    <div id="resetWarning" class="reset-warning">
+      ⚠️ <strong>Terrain resets in 1 minute!</strong> Head back to the Plaza!
+    </div>
 
-    joinBtn.addEventListener('click', () => {
-      const name = nameInput.value.trim();
-      if (!name) return;
-      sessionStorage.setItem('playerName',   name);
-      sessionStorage.setItem('playerColour', selectedColour);
-      window.location.href = 'game.html';
-    });
+    <!-- Full-screen reset overlay -->
+    <div id="resetOverlay" class="reset-overlay">
+      <div class="reset-overlay-box">
+        <div class="reset-overlay-icon">⛏️</div>
+        <div class="reset-overlay-title">Terrain Resetting…</div>
+        <div class="reset-overlay-sub">Generating new ore deposits with AI</div>
+        <div class="reset-overlay-sub" style="margin-top:6px;font-size:0.8em;opacity:0.7">Teleporting to Plaza</div>
+      </div>
+    </div>
 
-    try {
-      getPlayerCount(n => { countEl.textContent = n; });
-    } catch (_) {
-      countEl.textContent = '?';
-    }
-  </script>
+    <!-- ══════════════════════════════════════════════════
+         HUD — bottom-left
+         ══════════════════════════════════════════════════ -->
+    <div class="hud-bl">
+      <div class="compass" id="compass" aria-hidden="true">
+        <span class="compass-dir" id="compassDir">N</span>
+      </div>
+      <div class="controls-hint" aria-label="Controls">
+        WASD&nbsp;·&nbsp;Move &nbsp;|&nbsp;
+        Mouse&nbsp;·&nbsp;Look &nbsp;|&nbsp;
+        Space&nbsp;·&nbsp;Jump &nbsp;|&nbsp;
+        <span class="hint-dig">E&nbsp;·&nbsp;Dig / Shop ⛏</span> &nbsp;|&nbsp;
+        I&nbsp;·&nbsp;Bag &nbsp;|&nbsp;
+        T&nbsp;·&nbsp;Chat &nbsp;|&nbsp;
+        M&nbsp;·&nbsp;Map
+      </div>
+      <div class="hud-icon-row">
+        <button id="btnSettings" class="hud-icon-btn" title="Settings (ESC)" aria-label="Open settings">⚙</button>
+        <button id="btnCharacter" class="hud-icon-btn" title="Character customisation" aria-label="Open character editor">👤</button>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════
+         CLICK-TO-RESUME HINT  (shown when Escape closes the menu)
+         ══════════════════════════════════════════════════ -->
+    <div id="lockHint" class="lock-hint hidden"></div>
+
+    <!-- ══════════════════════════════════════════════════
+         PAUSE MENU  (Roblox-style)
+         Main screen: vertical button list
+         Sub-screens: Settings · Avatar (slide in)
+         ══════════════════════════════════════════════════ -->
+    <div id="pauseMenu" class="pm-overlay hidden" role="dialog" aria-modal="true" aria-label="Pause menu">
+
+      <!-- ── MAIN SCREEN ── -->
+      <div class="pm-panel" id="pmMain">
+        <div class="pm-logo">WALKWORLD</div>
+        <div class="pm-menu-list">
+
+          <button id="pmResume" class="pm-item pm-item-resume">
+            <span class="pm-item-icon">▶</span>
+            <span class="pm-item-label">Resume</span>
+          </button>
+
+          <button class="pm-item pm-item-nav" data-pm-tab="settings">
+            <span class="pm-item-icon">⚙</span>
+            <span class="pm-item-label">Settings</span>
+            <span class="pm-item-chevron">›</span>
+          </button>
+
+          <button class="pm-item pm-item-nav" data-pm-tab="avatar">
+            <span class="pm-item-icon">👤</span>
+            <span class="pm-item-label">Avatar</span>
+            <span class="pm-item-chevron">›</span>
+          </button>
+
+          <button id="pmResetChar" class="pm-item">
+            <span class="pm-item-icon">🔄</span>
+            <span class="pm-item-label">Reset Character</span>
+          </button>
+
+          <button id="pmJoin" class="pm-item pm-item-soon" disabled="">
+            <span class="pm-item-icon">🔗</span>
+            <span class="pm-item-label">Join Friend</span>
+            <span class="pm-item-badge">SOON</span>
+          </button>
+
+          <button id="pmLeave" class="pm-item pm-item-leave">
+            <span class="pm-item-icon">🚪</span>
+            <span class="pm-item-label">Leave Game</span>
+          </button>
+
+        </div>
+      </div><!-- /#pmMain -->
+
+      <!-- ── SETTINGS SCREEN ── -->
+      <div class="pm-panel pm-sub pm-hidden" id="pmTabSettings" role="tabpanel">
+        <div class="pm-sub-header">
+          <button class="pm-back-btn" data-pm-back="main">‹ Back</button>
+          <span class="pm-sub-title">SETTINGS</span>
+        </div>
+        <div class="pm-sub-body">
+
+          <div class="sp-section">
+            <p class="sp-section-title">MOUSE SENSITIVITY</p>
+            <div class="sp-sens-row">
+              <label for="spSensSlider">Sensitivity</label>
+              <input id="spSensSlider" class="sp-slider" type="range" min="0.0005" max="0.0080" step="0.0001" value="0.0022" aria-label="Mouse sensitivity">
+              <span id="spSensVal" class="sp-sens-val">0.0022</span>
+            </div>
+          </div>
+
+          <div class="sp-section">
+            <p class="sp-section-title">KEY BINDS</p>
+            <div class="sp-bind-row"><span class="sp-bind-label">Forward</span><button class="sp-bind-btn" data-bind="forward">W</button></div>
+            <div class="sp-bind-row"><span class="sp-bind-label">Back</span><button class="sp-bind-btn" data-bind="back">S</button></div>
+            <div class="sp-bind-row"><span class="sp-bind-label">Left</span><button class="sp-bind-btn" data-bind="left">A</button></div>
+            <div class="sp-bind-row"><span class="sp-bind-label">Right</span><button class="sp-bind-btn" data-bind="right">D</button></div>
+            <div class="sp-bind-row"><span class="sp-bind-label">Jump</span><button class="sp-bind-btn" data-bind="jump">Space</button></div>
+            <div class="sp-bind-row"><span class="sp-bind-label">Sprint</span><button class="sp-bind-btn" data-bind="sprint">Shift</button></div>
+            <div class="sp-bind-row"><span class="sp-bind-label">Chat</span><button class="sp-bind-btn" data-bind="chat">T</button></div>
+            <div class="sp-bind-row"><span class="sp-bind-label">Map</span><button class="sp-bind-btn" data-bind="map">M</button></div>
+          </div>
+
+          <div class="sp-reset-row">
+            <button id="spReset" class="sp-reset-btn">Reset Defaults</button>
+          </div>
+
+        </div>
+      </div><!-- /#pmTabSettings -->
+
+      <!-- ── AVATAR SCREEN ── -->
+      <div class="pm-panel pm-sub pm-hidden" id="pmTabAvatar" role="tabpanel">
+        <div class="pm-sub-header">
+          <button class="pm-back-btn" data-pm-back="main">‹ Back</button>
+          <span class="pm-sub-title">AVATAR</span>
+        </div>
+        <div class="pm-sub-body">
+
+          <div class="pm-avatar-wrap">
+            <div class="pm-avatar-preview">
+              <canvas id="pmPreviewCanvas" width="110" height="160"></canvas>
+            </div>
+            <div class="pm-avatar-controls">
+              <div class="pm-av-section">
+                <p class="pm-av-label">SKIN</p>
+                <div class="pm-av-swatches" id="pmSwatchSkin"></div>
+              </div>
+              <div class="pm-av-section">
+                <p class="pm-av-label">SHIRT</p>
+                <div class="pm-av-swatches" id="pmSwatchShirt"></div>
+              </div>
+              <div class="pm-av-section">
+                <p class="pm-av-label">PANTS</p>
+                <div class="pm-av-swatches" id="pmSwatchPants"></div>
+              </div>
+              <div class="pm-av-section">
+                <p class="pm-av-label">HAIR STYLE</p>
+                <div class="pm-av-hair-row" id="pmHairBtns"></div>
+              </div>
+              <div class="pm-av-section">
+                <p class="pm-av-label">HAIR COLOUR</p>
+                <div class="pm-av-swatches" id="pmSwatchHair"></div>
+              </div>
+              <div class="pm-av-section">
+                <p class="pm-av-label">HEIGHT &nbsp;<span id="pmHeightVal">1.00×</span></p>
+                <div class="sp-sens-row">
+                  <span style="font-size:13px;color:var(--c-muted)">Short</span>
+                  <input id="pmHeightSlider" class="sp-slider" type="range" min="0.70" max="1.40" step="0.01" value="1.00">
+                  <span style="font-size:13px;color:var(--c-muted)">Tall</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="sp-reset-row">
+            <button id="pmAvatarReset" class="sp-reset-btn">Reset Avatar</button>
+          </div>
+
+        </div>
+      </div><!-- /#pmTabAvatar -->
+
+    </div><!-- /#pauseMenu -->
+
+    <!-- ══════════════════════════════════════════════════
+         CHAT
+         ══════════════════════════════════════════════════ -->
+    <div class="chat-panel" id="chatPanel" aria-label="Chat">
+      <div class="chat-messages" id="chatMessages"></div>
+      <form class="chat-form" id="chatForm" autocomplete="off">
+        <input id="chatInput" class="chat-input" type="text" maxlength="80" placeholder="Press T to chat…" disabled="">
+        <button class="chat-send" type="submit" aria-label="Send">▶</button>
+      </form>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════
+         WORLD MAP OVERLAY  (toggled with M key)
+         ══════════════════════════════════════════════════ -->
+    <div id="mapOverlay" class="map-overlay hidden" role="dialog" aria-modal="true" aria-label="World map">
+      <div class="map-modal">
+        <div class="map-header">
+          <span class="map-title">🗺&nbsp; WORLD MAP</span>
+          <div class="map-zoom-btns">
+            <button id="mapZoomOut" class="map-zoom-btn" title="Zoom out (scroll ↓)" aria-label="Zoom out">−</button>
+            <span id="mapZoomDisplay" class="map-zoom-val">1.0×</span>
+            <button id="mapZoomIn" class="map-zoom-btn" title="Zoom in (scroll ↑)" aria-label="Zoom in">+</button>
+            <button id="mapClose" class="map-close-btn" title="Close map (M / ESC)" aria-label="Close map">✕</button>
+          </div>
+        </div>
+        <canvas id="mapCanvas" class="map-canvas"></canvas>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════
+         HOTBAR  (bottom centre — press 1-9 to switch)
+         ══════════════════════════════════════════════════ -->
+    <div class="hotbar-wrap">
+      <div class="hotbar-item-name" id="hotbarItemName"></div>
+      <div class="hotbar" id="hotbar" aria-label="Item hotbar">
+        <!-- Slots are built dynamically by inventory.js / game.js -->
+        <div class="hotbar-slot active" id="hotbarSlot1" data-slot="1">
+          <div class="hotbar-slot-key">1</div>
+          <div class="hotbar-slot-icon">🪵</div>
+          <div class="hotbar-slot-label">W.Shovel</div>
+          <div class="hotbar-dur-bar"><div class="hotbar-dur-fill" style="width:100%"></div></div>
+        </div>
+        <div class="hotbar-slot" id="hotbarSlot2" data-slot="2">
+          <div class="hotbar-slot-key">2</div>
+          <div class="hotbar-slot-icon">📡</div>
+          <div class="hotbar-slot-label">Detector</div>
+          <div class="hotbar-dur-bar" style="display:none"></div>
+        </div>
+        <div class="hotbar-slot" id="hotbarSlot3" data-slot="3">
+          <div class="hotbar-slot-key">3</div>
+          <div class="hotbar-slot-icon"></div>
+          <div class="hotbar-slot-label"></div>
+          <div class="hotbar-dur-bar" style="display:none"></div>
+        </div>
+        <div class="hotbar-slot" id="hotbarSlot4" data-slot="4">
+          <div class="hotbar-slot-key">4</div>
+          <div class="hotbar-slot-icon"></div>
+          <div class="hotbar-slot-label"></div>
+          <div class="hotbar-dur-bar" style="display:none"></div>
+        </div>
+        <div class="hotbar-slot" id="hotbarSlot5" data-slot="5">
+          <div class="hotbar-slot-key">5</div>
+          <div class="hotbar-slot-icon"></div>
+          <div class="hotbar-slot-label"></div>
+          <div class="hotbar-dur-bar" style="display:none"></div>
+        </div>
+        <div class="hotbar-slot" id="hotbarSlot6" data-slot="6">
+          <div class="hotbar-slot-key">6</div>
+          <div class="hotbar-slot-icon"></div>
+          <div class="hotbar-slot-label"></div>
+          <div class="hotbar-dur-bar" style="display:none"></div>
+        </div>
+        <div class="hotbar-slot" id="hotbarSlot7" data-slot="7">
+          <div class="hotbar-slot-key">7</div>
+          <div class="hotbar-slot-icon"></div>
+          <div class="hotbar-slot-label"></div>
+          <div class="hotbar-dur-bar" style="display:none"></div>
+        </div>
+        <div class="hotbar-slot" id="hotbarSlot8" data-slot="8">
+          <div class="hotbar-slot-key">8</div>
+          <div class="hotbar-slot-icon"></div>
+          <div class="hotbar-slot-label"></div>
+          <div class="hotbar-dur-bar" style="display:none"></div>
+        </div>
+        <div class="hotbar-slot" id="hotbarSlot9" data-slot="9">
+          <div class="hotbar-slot-key">9</div>
+          <div class="hotbar-slot-icon"></div>
+          <div class="hotbar-slot-label"></div>
+          <div class="hotbar-dur-bar" style="display:none"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════
+         DIG NOTIFICATION  (pops up when you mine something)
+         ══════════════════════════════════════════════════ -->
+    <div id="digNotif" class="dig-notif" aria-live="polite"></div>
+
+    <!-- Mining depth side panel (shows current layer) -->
+    <div id="miningPanel" class="mining-panel hidden">
+      <div class="mp-title">⛏ MINING</div>
+      <div id="mpDepth" class="mp-depth">0.0m</div>
+      <div id="mpLayer" class="mp-layer">Surface</div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════
+         SHOP PROXIMITY HINT  (shown near a shop)
+         ══════════════════════════════════════════════════ -->
+    <div id="shopHint" class="shop-hint hidden">
+      <span id="shopHintText">Press <kbd>E</kbd> to open shop</span>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════
+         SHOP OVERLAY
+         ══════════════════════════════════════════════════ -->
+    <div id="shopOverlay" class="shop-overlay hidden" role="dialog" aria-modal="true">
+      <div class="shop-panel">
+        <div class="shop-header">
+          <div>
+            <div class="shop-npc"></div>
+            <div class="shop-title"></div>
+            <div class="shop-desc"></div>
+          </div>
+          <div class="shop-header-right">
+            <div class="shop-money">💰 $0</div>
+            <button class="shop-close-btn" id="shopCloseBtn">✕</button>
+          </div>
+        </div>
+        <div class="shop-item-grid"></div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════
+         INVENTORY OVERLAY  (I / Tab key)
+         ══════════════════════════════════════════════════ -->
+    <div id="inventoryOverlay" class="inv-overlay hidden" role="dialog" aria-modal="true">
+      <div class="inv-panel">
+        <div class="inv-header">
+          <span class="inv-title">🎒 BACKPACK</span>
+          <div class="inv-header-right">
+            <span class="inv-capacity" id="invCapacity">0 / 9</span>
+            <button class="inv-close-btn" id="invCloseBtn">✕</button>
+          </div>
+        </div>
+        <div class="inv-grid" id="invGrid"></div>
+      </div>
+    </div>
+
+  </div><!-- /#gameWrapper -->
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script type="module" src="js/firebase-config.js"></script>
+  <script type="module" src="js/network.js"></script>
+  <script type="module" src="js/world.js"></script>
+  <script type="module" src="js/objects.js"></script>
+  <script type="module" src="js/player.js"></script>
+  <script type="module" src="js/character.js"></script>
+  <script type="module" src="js/renderer.js"></script>
+  <script type="module" src="js/layers.js"></script>
+  <script type="module" src="js/mining.js"></script>
+  <script type="module" src="js/inventory.js"></script>
+  <script type="module" src="js/shop.js"></script>
+  <script type="module" src="js/game.js"></script>
+
 
 
 
