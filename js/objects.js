@@ -356,6 +356,51 @@ function buildBoulders() {
   });
 }
 
+// ─────────────────────────────────────────────────────────────
+//  SHOP STALLS  (Part 4 — Plaza shops)
+//  Positions must match SHOP_POSITIONS in shop.js
+// ─────────────────────────────────────────────────────────────
+const SHOP_DEFS = [
+  { x: -12, z: -14, color: 0xb87333, roofColor: 0x7a4b1e },  // Tool Shop (copper/bronze)
+  { x:   0, z: -14, color: 0x2e7d32, roofColor: 0x1a4a1e },  // Gear Shop (green)
+  { x:  12, z: -14, color: 0x6a1b9a, roofColor: 0x3e0070 },  // Sell Stall (purple)
+];
+
+function buildShops() {
+  for (const { x, z, color, roofColor } of SHOP_DEFS) {
+    const ground  = getHeightAt(x, z);
+    const wallMat = new THREE.MeshLambertMaterial({ color });
+    const roofMat = new THREE.MeshLambertMaterial({ color: roofColor });
+    const cntMat  = new THREE.MeshLambertMaterial({ color: 0xd4a96a });
+    const geo     = new THREE.BoxGeometry(1, 1, 1);
+
+    const addBox = (mat, bx, by, bz, sx, sy, sz, ry = 0) => {
+      const m = new THREE.Mesh(geo, mat);
+      m.scale.set(sx, sy, sz);
+      m.position.set(bx, by, bz);
+      if (ry) m.rotation.x = ry;
+      scene.add(m);
+    };
+
+    // Back + side walls
+    addBox(wallMat, x, ground + 1.6, z - 1.55,  3.8, 3.2, 0.22);  // back
+    addBox(wallMat, x - 1.9, ground + 1.6, z,   0.22, 3.2, 3.2);  // left
+    addBox(wallMat, x + 1.9, ground + 1.6, z,   0.22, 3.2, 3.2);  // right
+
+    // Counter
+    addBox(cntMat, x, ground + 1.05, z + 1.25,  3.6, 0.24, 0.65);
+
+    // Roof (slightly tilted)
+    addBox(roofMat, x, ground + 3.2, z,  4.2, 0.22, 4.0, 0.18);
+
+    // NPC: body + head
+    const bodyMat = new THREE.MeshLambertMaterial({ color });
+    const headMat = new THREE.MeshLambertMaterial({ color: 0xffe0b2 });
+    addBox(bodyMat, x, ground + 0.9, z - 0.5,   0.7, 1.0, 0.4);
+    addBox(headMat, x, ground + 1.65, z - 0.5,  0.52, 0.52, 0.52);
+  }
+}
+
 export function initObjects() {
   buildTrees();
   buildRocks();
@@ -367,4 +412,5 @@ export function initObjects() {
   buildReeds();
   buildPlaza();
   buildBoulders();
+  buildShops();
 }
