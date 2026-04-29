@@ -17,7 +17,7 @@
 
 import { Player, camera, requestPointerLock, isPointerLocked } from './player.js';
 import { Renderer }   from './renderer.js';
-import { initWorld, getZoneName } from './world.js';
+import { initWorld, getZoneName, resetTerrain } from './world.js';
 import { initObjects } from './objects.js';
 import {
   joinGame,
@@ -29,6 +29,7 @@ import {
   sendChat,
   onChat,
 } from './network.js';
+import { onDig, getMoney, getDepthAt, getMaterialAtDepth, ORES, rollOre, resetMining, generateOreDeposits } from './mining.js';
 import {
   buildCharacter,
   getLocalCharConfig,
@@ -139,6 +140,17 @@ let isMapOpen     = false;
 let _lastPosSend = 0;
 const POS_INTERVAL = 100; // ms between Firebase position writes (~10 Hz)
 
+// ── Mining state ─────────────────────────────────────────────
+let _lastDigTime = 0;
+const DIG_COOLDOWN = 550; // ms between digs
+let _digNotifTimer = null;
+
+// ── 20-minute reset timer ────────────────────────────────────
+const RESET_DURATION  = 20 * 60;   // 20 minutes in seconds
+let   _resetSecondsLeft = RESET_DURATION;
+let   _resetWarned      = false;    // true once the 1-min warning fires
+let   _resetLastTick    = 0;        // timestamp of last countdown tick
+
 // ── Map overlay ──────────────────────────────────────────────
 const MAP_ZOOM_MIN  = 1;
 const MAP_ZOOM_MAX  = 8;
@@ -178,6 +190,14 @@ async function init() {
   initWorld();
   // Populate the scene (trees, rocks, cabin, plaza, etc.)
   initObjects();
+
+  // Ask Gemini to seed ore deposit hot-spots for this session
+  generateOreDeposits().catch(() => {});  // async, non-blocking
+
+  // Initialise the 20-minute reset countdown
+  _resetSecondsLeft = RESET_DURATION;
+  _resetWarned      = false;
+  _resetLastTick    = performance.now();
 
   setLoad(30, 'Spawning player…');
   await tick();
@@ -286,8 +306,93 @@ function gameLoop(timestamp) {
   updateMinimap();
   if (isMapOpen) drawMap();
 
+  // 20-minute countdown tick
+  _tickResetTimer(timestamp);
+
   renderer.draw(player, remotePlayers, timestamp);
 
+  rafId = requestAnimationFrame(gameLoop);
+}
+
+// ============================================================
+//  20-MINUTE TERRAIN RESET
+// ============================================================
+function _tickResetTimer(timestamp) {
+  const elapsed = (timestamp - _resetLastTick) / 1000;
+  if (elapsed < 1) return;   // only tick once per second
+  _resetLastTick = timestamp;
+
+  _resetSecondsLeft = Math.max(0, _resetSecondsLeft - Math.floor(elapsed));
+
+  // Update HUD timer
+  const timerEl = document.getElementById('hudResetTimer');
+  if (timerEl) {
+    const m = Math.floor(_resetSecondsLeft / 60);
+    const s = _resetSecondsLeft % 60;
+    timerEl.textContent = `⏱ ${m}:${String(s).padStart(2,'0')}`;
+
+    // Colour: white → amber (2 min) → red (1 min)
+    if (_resetSecondsLeft <= 60) {
+      timerEl.style.color = '#ff4444';
+    } else if (_resetSecondsLeft <= 120) {
+      timerEl.style.color = '#ffaa00';
+    } else {
+      timerEl.style.color = '#ffffff';
+    }
+  }
+
+  // 1-minute warning popup
+  if (_resetSecondsLeft <= 60 && !_resetWarned) {
+    _resetWarned = true;
+    _showResetWarning();
+  }
+
+  // Time's up — reset everything
+  if (_resetSecondsLeft <= 0) {
+    _doTerrainReset();
+  }
+}
+
+function _showResetWarning() {
+  const el = document.getElementById('resetWarning');
+  if (!el) return;
+  el.classList.add('visible');
+  setTimeout(() => el.classList.remove('visible'), 8000);
+}
+
+async function _doTerrainReset() {
+  // Stop the loop while we reset
+  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+
+  // Show the overlay
+  const overlay = document.getElementById('resetOverlay');
+  if (overlay) overlay.classList.add('visible');
+
+  // 1. Reset Three.js terrain geometry to original heights
+  resetTerrain();
+
+  // 2. Wipe all shaft 3D meshes and reset money
+  resetMining();
+
+  // 3. Teleport player back to the Plaza spawn
+  if (player) {
+    player.x  = 0;
+    player.y  = 2.0;
+    player.z  = 5;
+    player.vy = 0;
+    player.onGround = false;
+  }
+
+  // 4. Ask Gemini for a fresh ore deposit map
+  await generateOreDeposits().catch(() => {});
+
+  // 5. Restart the countdown
+  _resetSecondsLeft = RESET_DURATION;
+  _resetWarned      = false;
+  _resetLastTick    = performance.now();
+
+  // Hide the overlay and resume
+  if (overlay) overlay.classList.remove('visible');
   rafId = requestAnimationFrame(gameLoop);
 }
 
@@ -297,6 +402,34 @@ function gameLoop(timestamp) {
 function updateHUD() {
   hudPos.textContent  = `${player.x.toFixed(1)}, ${player.z.toFixed(1)}`;
   if (hudZone) hudZone.textContent = getZoneName(player.x, player.z);
+
+  // Money display
+  const moneyEl = document.getElementById('hudMoney');
+  if (moneyEl) moneyEl.textContent = '$' + getMoney().toLocaleString();
+
+  // Depth display
+  const depth = getDepthAt(player.x, player.z);
+  const depthEl = document.getElementById('hudDepth');
+  const depthPanel = document.getElementById('hudDepthPanel');
+  const zone = getZoneName(player.x, player.z);
+  if (depthEl && depthPanel) {
+    if (zone === 'Plaza') {
+      // Show the "no digging" indicator only if you're actually standing in the Plaza
+      depthEl.innerHTML = '🏛 Plaza — <span style="color:#ff9944">No Digging</span>';
+      depthEl.style.color = '#cccccc';
+      depthEl.style.display = '';
+      depthPanel.style.display = '';
+    } else if (depth > 0.3) {
+      const mat = getMaterialAtDepth(depth);
+      depthEl.textContent = '⛏ ' + depth.toFixed(1) + 'm — ' + mat.name;
+      depthEl.style.color = mat.hexColor;
+      depthEl.style.display = '';
+      depthPanel.style.display = '';
+    } else {
+      depthEl.style.display = 'none';
+      depthPanel.style.display = 'none';
+    }
+  }
 }
 
 // ============================================================
@@ -770,6 +903,23 @@ function setupChat(name, colour) {
       return;
     }
 
+    // ── Dig / mine (E key) ────────────────────────────────────
+    if (e.code === 'KeyE' && !isChatOpen && !isPauseOpen && isPointerLocked()) {
+      e.preventDefault();
+      const now = performance.now();
+      if (now - _lastDigTime >= DIG_COOLDOWN) {
+        _lastDigTime = now;
+        const digResult = onDig(player.x, player.z);
+        if (digResult) {
+          _showDigNotif(digResult);
+        } else {
+          // Distinguish Plaza block (indestructible) from max-depth
+          _showDigNotif(getZoneName(player.x, player.z) === 'Plaza' ? null : 'maxdepth');
+        }
+      }
+      return;
+    }
+
     if (e.code === chatKey && !isChatOpen && !isPauseOpen && isPointerLocked()) {
       e.preventDefault();
       openChat();
@@ -1175,6 +1325,64 @@ function _tickAvatarPreview() {
     requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
+}
+
+// ============================================================
+//  DIG NOTIFICATION
+// ============================================================
+function _showDigNotif(result) {
+  const el = document.getElementById('digNotif');
+  if (!el) return;
+
+  if (!result) {
+    // null = Plaza (indestructible) or max depth
+    el.innerHTML = '<span style="color:#ff9944">🏛 This ground cannot be dug!</span>';
+    el.className = 'dig-notif visible';
+    clearTimeout(_digNotifTimer);
+    _digNotifTimer = setTimeout(() => { el.className = 'dig-notif'; }, 1800);
+    return;
+  }
+
+  if (result === 'maxdepth') {
+    el.innerHTML = '<span style="color:#ff6b6b">⛔ Max depth reached!</span>';
+    el.className = 'dig-notif visible';
+    clearTimeout(_digNotifTimer);
+    _digNotifTimer = setTimeout(() => { el.className = 'dig-notif'; }, 1800);
+    return;
+  }
+
+  const { layer, ore, depth, earned, isDeposit } = result;
+
+  // If an ore was found, show it prominently; otherwise show the layer
+  const displayItem  = ore || layer;
+  const rarityClass  = 'rarity-' + displayItem.rarity;
+  const depositTag   = isDeposit ? '<span class="dn-deposit">💥 ORE DEPOSIT ×3</span>' : '';
+
+  if (ore) {
+    // ── Ore find ────────────────────────────────────────────
+    el.innerHTML =
+      '<span class="dn-ore-label">ORE FOUND!</span>' +
+      '<span class="dn-emoji">' + ore.emoji + '</span>' +
+      '<span class="dn-name ' + rarityClass + '" style="color:' + ore.hexColor + '">' + ore.name + '</span>' +
+      '<span class="dn-label" style="color:' + ore.hexColor + '">' + ore.label + '</span>' +
+      depositTag +
+      '<span class="dn-earned">+$' + earned + '</span>' +
+      '<span class="dn-depth">' + depth.toFixed(1) + 'm · ' + layer.name + '</span>';
+    el.className = 'dig-notif visible ore-found ' + rarityClass + (isDeposit ? ' deposit-hit' : '');
+  } else {
+    // ── Plain layer dig ──────────────────────────────────────
+    el.innerHTML =
+      '<span class="dn-emoji">' + layer.emoji + '</span>' +
+      '<span class="dn-name" style="color:' + layer.hexColor + '">' + layer.name + '</span>' +
+      depositTag +
+      '<span class="dn-earned">+$' + earned + '</span>' +
+      '<span class="dn-depth">' + depth.toFixed(1) + 'm deep</span>';
+    el.className = 'dig-notif visible ' + (isDeposit ? 'deposit-hit' : '');
+  }
+
+  const dur = isDeposit ? 3500 : ore ? (ore.rarity === 'legendary' || ore.rarity === 'epic' ? 3000 : 2200) : 1600;
+  clearTimeout(_digNotifTimer);
+  _digNotifTimer = setTimeout(() => { el.className = 'dig-notif'; }, dur);
 }
 
 // ============================================================
