@@ -1,5 +1,5 @@
 // ============================================================
-//  WalkWorld 3D — world.js  (SPHERICAL MINING REWRITE)
+//  WalkWorld 3D — world.js  (IMPROVED DIGGING REWRITE)
 // ============================================================
 
 export const WORLD_SIZE = 200;
@@ -9,24 +9,26 @@ export const SPAWN      = { x: 0, y: 2.0, z: 5 };
 
 export const scene = new THREE.Scene();
 
-const SEGS  = 120;
+// Higher segment count = more vertices = much more detailed holes
+const SEGS  = 200;
 const HSTEP = WORLD_SIZE / SEGS;
 
 let _hmap = null;
 
 // ============================================================
-//  SPHERICAL MINING SYSTEM
+//  MINING SYSTEM
 // ============================================================
 export const MINE_CELL     = 3.0;
-export const DIG_SPHERE_R  = 2.6;   // sphere excavation radius
-export const DIG_PER_PUNCH = 1.2;
-export const MAX_DIG_DEPTH = 120;
-export const DIG_REACH     = 3.5;   // how far ahead to dig
+export const DIG_SPHERE_R  = 5.0;   // big sphere = visible holes
+export const DIG_PER_PUNCH = 2.2;   // how much deeper each punch goes
+export const MAX_DIG_DEPTH = 200;
+export const DIG_REACH     = 3.5;
 
 const _shafts    = new Map();   // "cx,cz" -> { surfaceY, floorY, depth }
-const _sphereMap = new Map();   // "rx,rz" (1-unit) -> minY tracked
+const _sphereMap = new Map();   // "rx,rz" -> minY tracked
 
 let _terrainPosAttr = null;
+let _terrainColAttr = null;   // NEW: color buffer so we can color excavated areas
 let _terrainGeo     = null;
 let _originalY      = null;
 
@@ -108,7 +110,6 @@ export function getBaseHeightAt(x, z) {
 }
 
 export function getHeightAt(x, z) {
-  // Check sphere excavation map first (fine resolution)
   const mk = Math.round(x) + ',' + Math.round(z);
   const minY = _sphereMap.get(mk);
   if (minY !== undefined) return minY;
@@ -124,9 +125,18 @@ export function isBlocked(x, z) {
   return getZoneName(x, z) === 'Lake';
 }
 
+// ── Depth → underground color (for excavated vertices) ───────
+function _excavationColor(depth) {
+  if (depth < 1.5) return [0.38, 0.24, 0.10];   // topsoil — dark brown
+  if (depth < 5)   return [0.50, 0.30, 0.12];   // dirt — medium brown
+  if (depth < 12)  return [0.56, 0.34, 0.14];   // clay — orange-brown
+  if (depth < 25)  return [0.32, 0.30, 0.28];   // stone — gray
+  if (depth < 50)  return [0.14, 0.14, 0.26];   // dark stone — blue-gray
+  return [0.22, 0.08, 0.04];                     // dense ore — deep red
+}
+
 /**
  * Dig a smooth sphere at world position (digX, digY, digZ).
- * digY is the sphere center. The bowl goes from surfaceY down to digY-radius.
  */
 export function digSphere(digX, digY, digZ, radius) {
   if (getZoneName(digX, digZ) === 'Plaza') return null;
@@ -154,7 +164,7 @@ export function digSphere(digX, digY, digZ, radius) {
            floorY: newFloorY, depth: newDepth, digX, digY, digZ, radius };
 }
 
-/** Legacy: dig straight down at (x,z) */
+/** Dig straight down — always goes deeper each call */
 export function digShaft(x, z) {
   const surfaceY = _bilinearHeight(x, z);
   const cx  = _shaftCX(x);
@@ -178,8 +188,16 @@ export function resetTerrain() {
   clearShafts();
   for (let i = 0; i < _terrainPosAttr.count; i++) {
     _terrainPosAttr.setY(i, _originalY[i]);
+    if (_terrainColAttr) {
+      const vx = _terrainPosAttr.getX(i);
+      const vz = _terrainPosAttr.getZ(i);
+      const vy = _originalY[i];
+      const [r, g, b] = _terrainColour(vx, vz, vy);
+      _terrainColAttr.setXYZ(i, r, g, b);
+    }
   }
   _terrainPosAttr.needsUpdate = true;
+  if (_terrainColAttr) _terrainColAttr.needsUpdate = true;
   _terrainGeo.computeVertexNormals();
 }
 
@@ -197,21 +215,34 @@ function _excavateSphere(cx, cy, cz, radius) {
     const dz = vz - cz;
     const d2 = dx * dx + dz * dz;
 
-    if (d2 < r2) {
-      // Smooth hemisphere: bowl bottom = cy - sqrt(r² - dx² - dz²)
-      const bowlY = cy - Math.sqrt(r2 - d2);
-      if (vy > bowlY) {
-        _terrainPosAttr.setY(i, bowlY);
-        const mk = Math.round(vx) + ',' + Math.round(vz);
-        const prev = _sphereMap.get(mk);
-        if (prev === undefined || bowlY < prev) _sphereMap.set(mk, bowlY);
-        dirty = true;
+    if (d2 >= r2) continue;
+
+    // Smooth hemispherical bowl: deepest at center, slopes up to edges
+    const bowlY = cy - Math.sqrt(r2 - d2);
+
+    if (vy > bowlY) {
+      _terrainPosAttr.setY(i, bowlY);
+
+      // Update sphere map for player physics collision
+      const mk = Math.round(vx) + ',' + Math.round(vz);
+      const prev = _sphereMap.get(mk);
+      if (prev === undefined || bowlY < prev) _sphereMap.set(mk, bowlY);
+
+      // Color the excavated vertex based on depth below original surface
+      if (_terrainColAttr && _originalY) {
+        const origY = _originalY[i];
+        const excavDepth = origY - bowlY;
+        const [r, g, b] = _excavationColor(excavDepth);
+        _terrainColAttr.setXYZ(i, r, g, b);
       }
+
+      dirty = true;
     }
   }
 
   if (dirty) {
     _terrainPosAttr.needsUpdate = true;
+    if (_terrainColAttr) _terrainColAttr.needsUpdate = true;
     _terrainGeo.computeVertexNormals();
   }
 }
@@ -261,12 +292,15 @@ export function initWorld() {
 
   posAttr.needsUpdate = true;
   geoT.computeVertexNormals();
-  geoT.setAttribute('color', new THREE.BufferAttribute(colBuf, 3));
+
+  const colAttr = new THREE.BufferAttribute(colBuf, 3);
+  geoT.setAttribute('color', colAttr);
 
   const terrainMesh = new THREE.Mesh(geoT, new THREE.MeshLambertMaterial({ vertexColors: true }));
   scene.add(terrainMesh);
 
   _terrainPosAttr = posAttr;
+  _terrainColAttr = colAttr;   // save for live color updates during digging
   _terrainGeo     = geoT;
 
   _originalY = new Float32Array(posAttr.count);
@@ -278,11 +312,21 @@ export function initWorld() {
   _addWater(60, 50, 44, 36, waterMat);
   _addWater(-60, 38, 18, 14, waterMat);
 
+  // Deep underground floor visible from inside shafts
   const underGeo = new THREE.PlaneGeometry(WORLD_SIZE + 80, WORLD_SIZE + 80);
   underGeo.rotateX(-Math.PI / 2);
-  const under = new THREE.Mesh(underGeo, new THREE.MeshLambertMaterial({ color: 0x162d10 }));
-  under.position.y = -5.2;
+  const under = new THREE.Mesh(underGeo, new THREE.MeshLambertMaterial({ color: 0x0c1208 }));
+  under.position.y = -80;
   scene.add(under);
+
+  // Second bedrock layer closer to surface for depth perception
+  const bedrock = new THREE.Mesh(
+    new THREE.PlaneGeometry(WORLD_SIZE + 80, WORLD_SIZE + 80),
+    new THREE.MeshLambertMaterial({ color: 0x181414 })
+  );
+  bedrock.rotation.x = -Math.PI / 2;
+  bedrock.position.y = -15;
+  scene.add(bedrock);
 
   _buildHorizon();
   return scene;
