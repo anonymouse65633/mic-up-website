@@ -58,7 +58,7 @@ import {
 } from './events.js';
 
 // ── Part 5: AI Content ───────────────────────────────────────
-import { getChestLoot, getCabinLore, getOreDesc } from './aiContent.js';
+import { getChestLoot, getCabinLore, getOreDesc, getDailyChallenges, getDepositHint } from './aiContent.js';
 
 // ============================================================
 //  SETTINGS
@@ -606,6 +606,13 @@ function updateHUD() {
   // Expose depth for daily shop AI call
   window._playerDepthForShop = getDepthAt(player.x, player.z);
 
+  // Part 5: Track depth for reach_depth challenges (throttled — every 20 frames)
+  if (!window._challengeDepthTick) window._challengeDepthTick = 0;
+  if (++window._challengeDepthTick % 20 === 0) {
+    const _cd = window._playerDepthForShop;
+    if (_cd > 0.5) _onDepthForChallenges(_cd);
+  }
+
   // Money display
   const moneyEl = document.getElementById('hudMoney');
   if (moneyEl) moneyEl.textContent = '$' + getMoney().toLocaleString();
@@ -628,6 +635,8 @@ function updateHUD() {
       depthEl.style.color = mat.hexColor;
       depthEl.style.display = '';
       depthPanel.style.display = '';
+      // Part 5: expose current layer for deposit hint
+      window._currentLayerName = mat.name;
     } else {
       depthEl.style.display = 'none';
       depthPanel.style.display = 'none';
@@ -1093,6 +1102,15 @@ function _selectHotbarSlot(idx) {
 
   // Keep window.HOTBAR_SLOT for backwards compat
   window.HOTBAR_SLOT = String(idx + 1);
+
+  // Part 5: Show/hide deposit hint based on whether detector is active
+  const _newTool = playerInventory.getActiveTool();
+  const _isDetector = _newTool && (_newTool.id === 'detector' || String(_newTool.id).includes('detector'));
+  if (_isDetector) {
+    _tickDepositHint(); // Immediate hint when equipping detector
+  } else {
+    _hideDepositHint();
+  }
 }
 
 function _refreshHotbarSlot(idx) {
@@ -1290,6 +1308,10 @@ function setupPointerLock() {
 
   // ── Teleport Wheel (hold Y when underground) ─────────────
   _setupTeleportWheel();
+
+  // ── Part 5: Daily Challenges + Deposit Intelligence ──────
+  _initChallenges();
+  _startDepositHintSystem();
 }
 
 // ── Shared dig logic (used by mouse click AND E key) ─────────
@@ -1580,7 +1602,7 @@ function _handleCaveInteract() {
       'box-shadow:0 0 30px rgba(0,0,0,0.7)',
     ].join(';');
     popup.innerHTML =
-      '<div style="font-size:18px;margin-bottom:10px">📜 Miner's Log</div>' +
+      '<div style="font-size:18px;margin-bottom:10px">📜 Miner\'s Log</div>' +
       '<div style="color:#c0a870;line-height:1.7;min-height:42px;font-style:italic">Loading…</div>' +
       '<div style="margin-top:14px;font-size:11px;color:#666">[Click to close]</div>';
     popup.addEventListener('click', () => popup.remove());
@@ -1591,6 +1613,268 @@ function _handleCaveInteract() {
       if (textEl && popup.isConnected) { textEl.textContent = lore; textEl.style.fontStyle = 'normal'; }
     }).catch(() => {});
   }
+}
+
+
+// ── Part 5: Daily Challenge System ────────────────────────────
+//
+//  Challenges are AI-generated daily, cached until UTC midnight.
+//  Progress is tracked in memory (resets on page load — intentional,
+//  challenges are daily goals not persistent progress).
+//
+//  Supported types: find_ore, reach_depth, mine_count, earn_coins
+//
+// ─────────────────────────────────────────────────────────────
+
+let _challenges          = [];          // Active challenge list
+let _challengeProgress   = {};          // { challengeId: currentValue }
+let _challengeCompleted  = new Set();   // challenge ids that are done
+let _challengesBoardOpen = false;
+let _challengeTimerRaf   = null;
+let _sessionCoinsEarned  = 0;           // Tracks earn_coins challenge
+
+// Init — called from setupGame() after world loads
+async function _initChallenges() {
+  const depth    = window._playerDepthForShop ?? 0;
+  const prestige = window._playerPrestige     ?? 0;
+  _challenges = await getDailyChallenges(depth, prestige).catch(() => []);
+
+  // Initialise progress counters
+  _challengeProgress = {};
+  _challenges.forEach(ch => { _challengeProgress[ch.id] = 0; });
+
+  // Wire challenge board button
+  document.getElementById('btnChallenges')?.addEventListener('click', _openChallengeBoard);
+  document.getElementById('challengeCloseBtn')?.addEventListener('click', _closeChallengeBoard);
+
+  // C key toggles the board (when not chatting/paused)
+  document.addEventListener('keydown', e => {
+    if (e.code !== 'KeyC') return;
+    if (isChatOpen || isPauseOpen || isShopOpen()) return;
+    e.preventDefault();
+    _challengesBoardOpen ? _closeChallengeBoard() : _openChallengeBoard();
+  });
+
+  // Click backdrop to close
+  document.getElementById('challengeOverlay')?.addEventListener('click', e => {
+    if (e.target === document.getElementById('challengeOverlay')) _closeChallengeBoard();
+  });
+}
+
+function _openChallengeBoard() {
+  const overlay = document.getElementById('challengeOverlay');
+  if (!overlay) return;
+  overlay.classList.remove('hidden');
+  _challengesBoardOpen = true;
+  _renderChallengeList();
+  _tickChallengeTimer();
+  // Release pointer lock so mouse can interact
+  document.exitPointerLock?.();
+}
+
+function _closeChallengeBoard() {
+  document.getElementById('challengeOverlay')?.classList.add('hidden');
+  _challengesBoardOpen = false;
+  if (_challengeTimerRaf) cancelAnimationFrame(_challengeTimerRaf);
+  // Restore pointer lock
+  setTimeout(() => requestPointerLock(gameCanvas), 100);
+}
+
+function _tickChallengeTimer() {
+  const el = document.getElementById('challengeResetTimer');
+  if (el) {
+    const d = new Date();
+    const midnight = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1));
+    const secs = Math.floor((midnight - d) / 1000);
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    el.textContent = `Resets in ${h}h ${m}m`;
+  }
+  if (_challengesBoardOpen) {
+    _challengeTimerRaf = requestAnimationFrame(_tickChallengeTimer);
+  }
+}
+
+function _renderChallengeList() {
+  const list = document.getElementById('challengeList');
+  if (!list) return;
+
+  if (_challenges.length === 0) {
+    list.innerHTML = '<div class="challenge-loading"><span>No challenges today — check back later.</span></div>';
+    return;
+  }
+
+  list.innerHTML = '';
+  _challenges.forEach(ch => {
+    const progress   = _challengeProgress[ch.id] ?? 0;
+    const target     = ch.count ?? ch.depth ?? ch.coins ?? 1;
+    const pct        = Math.min(100, Math.round((progress / target) * 100));
+    const done       = _challengeCompleted.has(ch.id);
+
+    const card = document.createElement('div');
+    card.className = 'challenge-card' + (done ? ' completed' : '');
+    card.dataset.chId = ch.id;
+
+    card.innerHTML = `
+      <div class="challenge-card-top">
+        <span class="challenge-emoji">${ch.emoji}</span>
+        <div class="challenge-info">
+          <div class="challenge-name">${ch.title}</div>
+          <div class="challenge-desc">${ch.description}</div>
+          <div class="challenge-reward">🎁 ${ch.reward_desc}</div>
+        </div>
+      </div>
+      <div class="challenge-progress-wrap">
+        <div class="challenge-progress-bar" style="width:${done ? 100 : pct}%"></div>
+      </div>
+      <div class="challenge-progress-label">${done ? 'Complete!' : `${progress} / ${target}`}</div>
+    `;
+    list.appendChild(card);
+  });
+}
+
+function _updateChallengeCard(challengeId) {
+  const card = document.querySelector(`.challenge-card[data-ch-id="${challengeId}"]`);
+  if (!card) return;
+  const ch     = _challenges.find(c => c.id === challengeId);
+  if (!ch) return;
+  const progress = _challengeProgress[challengeId] ?? 0;
+  const target   = ch.count ?? ch.depth ?? ch.coins ?? 1;
+  const pct      = Math.min(100, Math.round((progress / target) * 100));
+  const done     = _challengeCompleted.has(challengeId);
+  card.className = 'challenge-card' + (done ? ' completed' : '');
+  const bar      = card.querySelector('.challenge-progress-bar');
+  const label    = card.querySelector('.challenge-progress-label');
+  if (bar)   bar.style.width   = (done ? 100 : pct) + '%';
+  if (label) label.textContent = done ? 'Complete!' : `${progress} / ${target}`;
+}
+
+function _completeChallenge(ch) {
+  if (_challengeCompleted.has(ch.id)) return;
+  _challengeCompleted.add(ch.id);
+  addMoney(ch.reward_coins);
+  _updateChallengeCard(ch.id);
+
+  // Completion toast
+  const toast = document.createElement('div');
+  toast.className = 'challenge-complete-toast';
+  toast.innerHTML = `
+    <span class="cct-emoji">🎉</span>
+    <div class="cct-body">
+      <div class="cct-title">Challenge Complete!</div>
+      <div class="cct-sub">${ch.title} — ${ch.reward_desc}</div>
+    </div>`;
+  document.body.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('visible'));
+  setTimeout(() => {
+    toast.classList.remove('visible');
+    setTimeout(() => toast.remove(), 400);
+  }, 3500);
+}
+
+/**
+ * Called from the dig handler whenever an ore is found.
+ * oreId: string  (e.g. 'ruby', 'coal')
+ * depth: number
+ * earned: number (coins gained)
+ */
+function _onOreFoundForChallenges(oreId, depth, earned) {
+  _sessionCoinsEarned += earned;
+
+  _challenges.forEach(ch => {
+    if (_challengeCompleted.has(ch.id)) return;
+    let progressed = false;
+
+    if (ch.type === 'find_ore' && ch.ore_id === oreId) {
+      _challengeProgress[ch.id] = (_challengeProgress[ch.id] ?? 0) + 1;
+      progressed = true;
+    }
+    if (ch.type === 'mine_count') {
+      _challengeProgress[ch.id] = (_challengeProgress[ch.id] ?? 0) + 1;
+      progressed = true;
+    }
+    if (ch.type === 'earn_coins') {
+      _challengeProgress[ch.id] = _sessionCoinsEarned;
+      progressed = true;
+    }
+    if (ch.type === 'reach_depth' && depth >= ch.depth) {
+      _challengeProgress[ch.id] = depth;
+      progressed = true;
+    }
+
+    if (progressed) {
+      const target = ch.count ?? ch.depth ?? ch.coins ?? 1;
+      if (_challengesBoardOpen) _updateChallengeCard(ch.id);
+      if ((_challengeProgress[ch.id] ?? 0) >= target) {
+        _completeChallenge(ch);
+      }
+    }
+  });
+}
+
+/**
+ * Called whenever the player digs to check reach_depth challenges.
+ */
+function _onDepthForChallenges(depth) {
+  _challenges.forEach(ch => {
+    if (ch.type !== 'reach_depth' || _challengeCompleted.has(ch.id)) return;
+    if (depth >= ch.depth) {
+      _challengeProgress[ch.id] = depth;
+      if (_challengesBoardOpen) _updateChallengeCard(ch.id);
+      _completeChallenge(ch);
+    }
+  });
+}
+
+// ── Part 5: Deposit Intelligence (Ore Detector HUD) ──────────
+//
+//  When the player has the Ore Detector in their active hotbar slot
+//  and is underground, periodically fetch an AI hint and show it.
+//
+// ─────────────────────────────────────────────────────────────
+
+let _depositHintInterval = null;
+let _recentOreIds        = [];   // Rolling last-10 ores found
+
+function _startDepositHintSystem() {
+  // Poll every 90s (same as getDepositHint throttle)
+  _depositHintInterval = setInterval(_tickDepositHint, 90_000);
+}
+
+async function _tickDepositHint() {
+  // Only show when underground and detector is active hotbar slot
+  const depth = window._playerDepthForShop ?? 0;
+  if (depth < 3) { _hideDepositHint(); return; }
+
+  const activeSlot = playerInventory.activeSlot ?? 0;
+  const activeItem = playerInventory.slots?.[activeSlot];
+  const hasDetector = activeItem && (activeItem.id === 'detector' || activeItem.id?.includes('detector'));
+  if (!hasDetector) { _hideDepositHint(); return; }
+
+  // Get detector tier from tool definition
+  const detectorTier = activeItem.tier ?? 1;
+  const layer = window._currentLayerName ?? 'Stone';
+
+  const hint = await getDepositHint(depth, layer, _recentOreIds.slice(-5), detectorTier).catch(() => null);
+  if (hint) _showDepositHint(hint);
+}
+
+function _showDepositHint(text) {
+  const hud = document.getElementById('depositHintHud');
+  const txt = document.getElementById('depositHintText');
+  if (!hud || !txt) return;
+  txt.textContent = text;
+  hud.classList.remove('hidden');
+}
+
+function _hideDepositHint() {
+  document.getElementById('depositHintHud')?.classList.add('hidden');
+}
+
+// Track Recent Ores (for deposit hint context)
+function _trackOreForDepositHint(oreId) {
+  _recentOreIds.push(oreId);
+  if (_recentOreIds.length > 10) _recentOreIds.shift();
 }
 
 // Track last dig point for "Last Dig" slot
@@ -2307,6 +2591,10 @@ function _showDigNotif(result) {
         descEl.style.display = '';
       }
     }).catch(() => {});
+
+    // Part 5: Challenge tracking + deposit hint context
+    _onOreFoundForChallenges(ore.id, depth, earned);
+    _trackOreForDepositHint(ore.id);
   } else {
     el.innerHTML =
       '<span class="dn-emoji">' + layer.emoji + '</span>' +
