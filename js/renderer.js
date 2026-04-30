@@ -127,6 +127,22 @@ export class Renderer {
     this._overlayCtx = this._overlay.getContext('2d');
     wrapper.appendChild(this._overlay);
     this._resizeOverlay();
+    this._nameHitRegions = [];
+
+    // Part 8: enable pointer events only for report flag clicks
+    this._overlay.style.pointerEvents = 'all';
+    this._overlay.style.cursor = 'default';
+    this._overlay.addEventListener('click', e => {
+      const rect = this._overlay.getBoundingClientRect();
+      const cx = e.clientX - rect.left;
+      const cy = e.clientY - rect.top;
+      for (const r of this._nameHitRegions) {
+        if (cx >= r.x && cx <= r.x + r.w && cy >= r.y && cy <= r.y + r.h) {
+          if (window._triggerReportModal) window._triggerReportModal(r.id, r.name);
+          break;
+        }
+      }
+    });
 
     // ── Minimap canvas ───────────────────────────────────────
     this._miniCanvas = _mkCanvas(`
@@ -246,6 +262,9 @@ export class Renderer {
 
     ctx.clearRect(0, 0, W, H);
 
+    // Part 8: store hit regions for report clicks
+    this._nameHitRegions = [];
+
     for (const [id, p] of Object.entries(remotePlayers)) {
       // World-space point just above the character's head
       const worldPos = new THREE.Vector3(
@@ -285,6 +304,19 @@ export class Renderer {
 
       ctx.fillStyle = '#ffffff';
       ctx.fillText(name, sx, sy);
+
+      // Report flag (🚩 small, top-right of nameplate)
+      ctx.font = '10px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillStyle = 'rgba(255,80,80,0.80)';
+      ctx.fillText('🚩', sx + bw / 2 - 2, sy - bh / 2 - 1);
+
+      // Store hit region for click detection
+      this._nameHitRegions.push({
+        id, name,
+        x: sx - bw / 2, y: sy - bh / 2 - 12,
+        w: bw + 14, h: bh + 12,
+      });
 
       // ── Chat bubble ───────────────────────────────────────
       const bubble = this._bubbles[id];
