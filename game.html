@@ -126,7 +126,7 @@
         WASD&nbsp;·&nbsp;Move &nbsp;|&nbsp;
         Mouse&nbsp;·&nbsp;Look &nbsp;|&nbsp;
         Space&nbsp;·&nbsp;Jump &nbsp;|&nbsp;
-        <span class="hint-dig">E&nbsp;·&nbsp;Dig (aim any dir) / Shop ⛏</span> &nbsp;|&nbsp;
+        <span class="hint-dig">Click&nbsp;·&nbsp;Dig / E&nbsp;·&nbsp;Shop ⛏</span> &nbsp;|&nbsp;
         I&nbsp;·&nbsp;Bag &nbsp;|&nbsp;
         T&nbsp;·&nbsp;Chat &nbsp;|&nbsp;
         M&nbsp;·&nbsp;Map
@@ -141,6 +141,16 @@
          CLICK-TO-RESUME HINT  (shown when Escape closes the menu)
          ══════════════════════════════════════════════════ -->
     <div id="lockHint" class="lock-hint hidden"></div>
+
+    <!-- ══════════════════════════════════════════════════
+         UNDERGROUND ESCAPE BUTTON (shown when below surface)
+         ══════════════════════════════════════════════════ -->
+    <div id="undergroundEscape" class="underground-escape hidden">
+      <div class="ug-depth-label" id="ugDepthLabel">⛏ 5.0m underground</div>
+      <button id="ugTeleportBtn" class="ug-teleport-btn">
+        🏛 Teleport to Plaza
+      </button>
+    </div>
 
     <!-- ══════════════════════════════════════════════════
          PAUSE MENU  (Roblox-style)
@@ -442,6 +452,7 @@
   <script type="module" src="js/inventory.js"></script>
   <script type="module" src="js/shop.js"></script>
   <script type="module" src="js/game.js"></script>
+
 
 
 
