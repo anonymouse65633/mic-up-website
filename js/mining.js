@@ -34,11 +34,12 @@ import {
   MINE_CELL, DIG_SPHERE_R, DIG_REACH, getBaseHeightAt,
 } from './world.js';
 
+import { GEMINI_API_KEY } from './config.js';
+
 // ============================================================
 //  GEMINI ORE DEPOSIT GENERATION
 // ============================================================
-const GEMINI_API_KEY  = 'AIzaSyCMQqhCFpF5f1_6Fz_MJVHHFj9eYSZQVww';
-const GEMINI_ENDPOINT =
+const GEMINI_ENDPOINT = () =>
   `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
 
 const FALLBACK_DEPOSITS = [
@@ -66,13 +67,20 @@ Rules:
 Return ONLY a valid JSON array like: [{"cx":3,"cz":-7},{"cx":4,"cz":-7}]
 No markdown, no explanation.`;
 
+  if (!GEMINI_API_KEY || GEMINI_API_KEY.startsWith('REPLACE_WITH')) {
+    console.warn('[Mining] Gemini API key not configured, using fallback deposits.');
+    _deposits = [...FALLBACK_DEPOSITS];
+    _deposits.forEach(d => _depositSet.add(`${d.cx},${d.cz}`));
+    return;
+  }
+
   try {
-    const res = await fetch(GEMINI_ENDPOINT, {
+    const res = await fetch(GEMINI_ENDPOINT(), {
       method  : 'POST',
       headers : { 'Content-Type': 'application/json' },
       body    : JSON.stringify({
         contents        : [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 1.1, maxOutputTokens: 512 },
+        generationConfig: { temperature: 0.9, maxOutputTokens: 512 },
       }),
     });
     if (!res.ok) throw new Error(`Gemini HTTP ${res.status}`);
@@ -502,7 +510,7 @@ function _buildOreCrystalCluster(group, cx, baseY, cz, ore, depth, oreSize = 1) 
     group.add(ring); pulseRings.push(ring);
 
   } else if (rarity === 'uncommon') {
-    const mat = mkMat(0.35);
+    const mat = mkMat(0.65);
     const count = Math.round(4 * sizeFactor);
     for (let i = 0; i < count; i++) {
       const angle = (i / count) * Math.PI * 2 + rng() * 0.6;
@@ -513,12 +521,10 @@ function _buildOreCrystalCluster(group, cx, baseY, cz, ore, depth, oreSize = 1) 
       mesh.rotation.y = rng() * Math.PI;
       group.add(mesh); crystals.push(mesh);
     }
-    const light = new THREE.PointLight(oreColor, 0.6 * sizeFactor, 5);
-    light.position.set(cx, baseY + 0.4, cz);
-    group.add(light); pointLights.push(light);
+    // Emissive-only lighting — no PointLight to avoid WebGL uniform overflow
 
   } else if (rarity === 'rare') {
-    const mat = mkMat(0.55);
+    const mat = mkMat(0.85);
     const sz  = (0.22 + rng() * 0.12) * sizeFactor;
     const main = new THREE.Mesh(new THREE.DodecahedronGeometry(sz, 0), mat);
     main.position.set(cx, baseY + sz + 0.06, cz);
@@ -541,12 +547,11 @@ function _buildOreCrystalCluster(group, cx, baseY, cz, ore, depth, oreSize = 1) 
     pulseMesh.rotation.x = Math.PI / 2;
     pulseMesh.position.set(cx, baseY + sz + 0.06, cz);
     group.add(pulseMesh); pulseRings.push(pulseMesh);
-    const light = new THREE.PointLight(oreColor, 1.0 * sizeFactor, 7);
-    light.position.set(cx, baseY + sz + 0.2, cz);
-    group.add(light); pointLights.push(light);
+    // Emissive-only — no PointLight (prevents WebGL uniform overflow)
+    // Higher emissiveIntensity compensates for the missing point light
 
   } else if (rarity === 'epic') {
-    const mat = mkMat(0.70);
+    const mat = mkMat(1.0);
     const sz  = (0.28 + rng() * 0.10) * sizeFactor;
     const main = new THREE.Mesh(new THREE.IcosahedronGeometry(sz, 0), mat);
     main.position.set(cx, baseY + sz + 0.08, cz);
@@ -556,16 +561,11 @@ function _buildOreCrystalCluster(group, cx, baseY, cz, ore, depth, oreSize = 1) 
       group.add(orbMesh);
       satellites.push({ mesh: orbMesh, angle: (i / 3) * Math.PI * 2, dist: 0.42 * sizeFactor, speed: 0.85 + rng() * 0.3, baseY: baseY + sz + 0.08, tiltZ: 0 });
     }
-    const l1 = new THREE.PointLight(oreColor, 1.0 * sizeFactor, 8);
-    l1.position.set(cx, baseY + sz + 0.3, cz);
-    group.add(l1); pointLights.push(l1);
-    const l2 = new THREE.PointLight(oreColor, 0.5 * sizeFactor, 5);
-    l2.position.set(cx, baseY + 0.05, cz);
-    group.add(l2); pointLights.push(l2);
+    // Emissive-only — no PointLights (prevents WebGL uniform overflow)
     floatAmp = 0.06;
 
   } else if (rarity === 'legendary') {
-    const mat = mkMat(0.85);
+    const mat = mkMat(1.2);
     const sz  = (0.22 + rng() * 0.06) * sizeFactor;
     const main = new THREE.Mesh(new THREE.TorusKnotGeometry(sz, sz * 0.32, 64, 8, 2, 3), mat);
     main.position.set(cx, baseY + sz + 0.3, cz);
@@ -573,13 +573,11 @@ function _buildOreCrystalCluster(group, cx, baseY, cz, ore, depth, oreSize = 1) 
     const hazeMesh = new THREE.Mesh(new THREE.SphereGeometry(sz * 2.2, 8, 6), new THREE.MeshLambertMaterial({ color: oreColor, transparent: true, opacity: 0.08, depthWrite: false }));
     hazeMesh.position.set(cx, baseY + sz + 0.3, cz);
     group.add(hazeMesh);
-    const light = new THREE.PointLight(oreColor, 1.8 * sizeFactor, 12);
-    light.position.set(cx, baseY + sz + 0.4, cz);
-    group.add(light); pointLights.push(light);
+    // Emissive-only — no PointLight (prevents WebGL uniform overflow)
     floatAmp = 0.12;
 
   } else if (rarity === 'mythic') {
-    const mat = mkMat(1.0);
+    const mat = mkMat(1.5);
     const sz  = (0.26 + rng() * 0.06) * sizeFactor;
     const main = new THREE.Mesh(new THREE.TorusKnotGeometry(sz, sz * 0.36, 96, 10, 3, 4), mat);
     main.position.set(cx, baseY + sz + 0.35, cz);
@@ -594,9 +592,7 @@ function _buildOreCrystalCluster(group, cx, baseY, cz, ore, depth, oreSize = 1) 
       group.add(oMesh);
       satellites.push({ mesh: oMesh, angle: (i / 3) * Math.PI * 2, dist: 0.5 * sizeFactor, speed: 1.4 + rng() * 0.4, baseY: baseY + sz + 0.35, tiltZ: 0 });
     }
-    const light = new THREE.PointLight(oreColor, 2.5 * sizeFactor, 16);
-    light.position.set(cx, baseY + sz + 0.5, cz);
-    group.add(light); pointLights.push(light);
+    // Emissive-only — no PointLight (prevents WebGL uniform overflow)
     floatAmp = 0.18;
   }
 
