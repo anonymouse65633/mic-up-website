@@ -2442,3 +2442,183 @@
   font-size: 15px; font-weight: 700; cursor: pointer;
 }
 .pc-close:hover { transform: scale(1.05); }
+
+/* ============================================================
+   PART 7 — UI / UX
+   ============================================================ */
+
+/* ── Money badge (+X / -X) ─────────────────────────────────── */
+.money-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+  margin-left: 4px;
+  transition: opacity 0.3s;
+  pointer-events: none;
+}
+.money-badge.positive { background: rgba(46,213,115,0.25); color: #2ed573; }
+.money-badge.negative { background: rgba(255,71,87,0.25);  color: #ff4757; }
+.money-badge.hidden   { opacity: 0; }
+
+/* ── Depth pill pulse ──────────────────────────────────────── */
+@keyframes depth-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(255,255,255,0.4); }
+  60%  { box-shadow: 0 0 0 8px rgba(255,255,255,0); }
+  100% { box-shadow: 0 0 0 0 rgba(255,255,255,0); }
+}
+.hud-depth-panel {
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 6px;
+  padding: 3px 8px;
+  transition: background 0.8s, border-color 0.8s;
+}
+.depth-pulse { animation: depth-pulse 0.6s ease-out; }
+
+/* ── Ore toast ─────────────────────────────────────────────── */
+.ore-toast-container {
+  position: fixed;
+  bottom: 80px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 8500;
+  pointer-events: none;
+}
+.ore-toast {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  border-radius: 7px;
+  background: rgba(15,15,25,0.88);
+  border: 1px solid rgba(255,255,255,0.18);
+  font-size: 12px;
+  color: #eee;
+  opacity: 0;
+  transform: translateX(30px);
+  transition: opacity 0.25s, transform 0.25s;
+  pointer-events: auto;
+  min-width: 160px;
+}
+.ore-toast.visible { opacity: 1; transform: translateX(0); }
+.ore-toast.fading  { opacity: 0; transform: translateX(30px); }
+.ore-toast-legendary {
+  border-color: #ffd70088;
+  box-shadow: 0 0 12px #ffd70033;
+}
+.ore-toast-swatch {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.ore-toast-name   { font-weight: 700; flex: 1; }
+.ore-toast-value  { color: #ffd700; }
+.ore-toast-depth  { color: #aaa; font-size: 10px; }
+.ore-toast-close  {
+  background: none; border: none; color: #aaa;
+  cursor: pointer; font-size: 14px; padding: 0 2px;
+  pointer-events: auto;
+}
+.ore-toast-close:hover { color: #fff; }
+
+/* ── Inactive warning ──────────────────────────────────────── */
+.inactive-warning {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(20,20,30,0.92);
+  border: 1px solid #ff9944;
+  color: #ff9944;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  z-index: 9500;
+  pointer-events: none;
+  text-align: center;
+}
+.inactive-warning.hidden { display: none; }
+
+/* ── Inactive kick screen ──────────────────────────────────── */
+.inactive-kick-screen {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.85);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 99999;
+}
+.inactive-kick-screen.hidden { display: none; }
+.inactive-kick-box {
+  background: rgba(20,20,30,0.96);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 12px;
+  padding: 32px 40px;
+  text-align: center;
+  color: #ccc;
+}
+
+/* ── Chat fade ─────────────────────────────────────────────── */
+.chat-messages { transition: opacity 0.8s; }
+.chat-messages.chat-faded { opacity: 0.12; }
+
+/* ── Chat color coding ─────────────────────────────────────── */
+.chat-join-leave { color: #6868a8 !important; font-size: 11px; opacity: 0.75; }
+.chat-event      { color: #ffd700 !important; font-weight: 600; }
+.chat-depth      { color: #2ed573 !important; }
+.chat-legendary  { color: #cc66ff !important; font-weight: 700; }
+.chat-ore        { font-weight: 600; }
+
+/* ── Minimap mode button ───────────────────────────────────── */
+.minimap-mode-btn {
+  position: absolute;
+  bottom: 20px; left: 3px;
+  background: rgba(15,15,25,0.75);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 4px;
+  color: #fff;
+  font-size: 11px;
+  width: 20px; height: 20px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  z-index: 10;
+  padding: 0;
+}
+.minimap-mode-btn:hover { background: rgba(40,40,60,0.9); }
+.minimap-wrap { position: relative; }
+
+/* ── Save progress banner ──────────────────────────────────── */
+.save-progress-banner {
+  position: fixed;
+  bottom: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(15,15,30,0.93);
+  border: 1px solid rgba(30,144,255,0.5);
+  color: #ccc;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 12px;
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.save-progress-banner.hidden { display: none; }
+.save-link-btn {
+  background: rgba(30,144,255,0.2);
+  border: 1px solid #1e90ff88;
+  color: #1e90ff;
+  border-radius: 5px;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.save-link-btn:hover { background: rgba(30,144,255,0.35); }
+.save-dismiss-btn {
+  background: none; border: none;
+  color: #888; cursor: pointer; font-size: 16px; padding: 0 2px;
+}
+.save-dismiss-btn:hover { color: #fff; }
