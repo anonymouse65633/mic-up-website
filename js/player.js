@@ -1,12 +1,12 @@
 // ============================================================
-//  WalkWorld 3D — player.js  (with shaft-escape jump boost)
+//  WalkWorld 3D — player.js
 // ============================================================
 
 import { getHeightAt, getBaseHeightAt, isBlocked, SPAWN, HALF } from './world.js';
 
 const MOVE_SPEED   = 9.0;
 const SPRINT_MOD   = 1.65;
-const JUMP_VY      = 7.5;
+const JUMP_VY      = 7.5;   // constant — no boost when underground
 const GRAVITY      = -22.0;
 const EYE_HEIGHT   = 1.65;
 const PITCH_LIMIT  = Math.PI * 0.44;
@@ -167,18 +167,10 @@ export class Player {
       if (!isBlocked(this.x, nz))     this.z = nz;
     }
 
-    // ── 3. Jump — boosted when inside a shaft ──────────────
+    // ── 3. Jump — ALWAYS same height (no underground boost)
+    //   Use the teleport button to escape holes instead.
     if (_pressed('jump') && this.onGround) {
-      const surfaceY   = getBaseHeightAt(this.x, this.z);
-      const shaftDepth = Math.max(0, surfaceY - this.y);
-
-      if (shaftDepth > 0.3) {
-        // Boost jump velocity just enough to escape the shaft + 1.5m clearance
-        const escapeVY = Math.sqrt(2 * Math.abs(GRAVITY) * (shaftDepth + 1.5));
-        this.vy = Math.max(JUMP_VY, escapeVY);
-      } else {
-        this.vy = JUMP_VY;
-      }
+      this.vy = JUMP_VY;
       this.onGround = false;
     }
 
