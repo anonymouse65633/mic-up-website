@@ -71,22 +71,28 @@
     </div>
 
     <!-- ══════════════════════════════════════════════════
-         HUD — top-right (online + money)
+         HUD — top-right panel (minimap + online + money)
          ══════════════════════════════════════════════════ -->
-    <div class="hud hud-tr" id="hudOnline">
-      <span class="dot-pulse"></span>
-      <span id="hudCount">0</span>&nbsp;online
-    </div>
-
-    <!-- Money HUD -->
-    <div class="hud hud-money" id="hudMoneyPanel">
-      <span class="money-coin">💰</span>
-      <span id="hudMoney">$0</span>
-    </div>
-
-    <!-- Depth / layer indicator (shown only when inside a shaft) -->
-    <div class="hud hud-depth-panel" id="hudDepthPanel" style="display:none">
-      <span id="hudDepth"></span>
+    <div class="hud-tr-column">
+      <!-- Minimap -->
+      <div class="minimap-wrap" id="minimapWrap">
+        <canvas id="minimapCanvas" width="110" height="110"></canvas>
+        <div class="minimap-label" id="minimapZoneLabel">Plains</div>
+      </div>
+      <!-- Online counter -->
+      <div class="hud hud-tr" id="hudOnline">
+        <span class="dot-pulse"></span>
+        <span id="hudCount">0</span>&nbsp;online
+      </div>
+      <!-- Money HUD -->
+      <div class="hud hud-money" id="hudMoneyPanel">
+        <span class="money-coin">💰</span>
+        <span id="hudMoney">$0</span>
+      </div>
+      <!-- Depth / layer indicator -->
+      <div class="hud hud-depth-panel" id="hudDepthPanel" style="display:none">
+        <span id="hudDepth"></span>
+      </div>
     </div>
 
     <!-- 20-minute terrain reset countdown -->
@@ -120,7 +126,7 @@
         WASD&nbsp;·&nbsp;Move &nbsp;|&nbsp;
         Mouse&nbsp;·&nbsp;Look &nbsp;|&nbsp;
         Space&nbsp;·&nbsp;Jump &nbsp;|&nbsp;
-        <span class="hint-dig">E&nbsp;·&nbsp;Dig / Shop ⛏</span> &nbsp;|&nbsp;
+        <span class="hint-dig">E&nbsp;·&nbsp;Dig (aim any dir) / Shop ⛏</span> &nbsp;|&nbsp;
         I&nbsp;·&nbsp;Bag &nbsp;|&nbsp;
         T&nbsp;·&nbsp;Chat &nbsp;|&nbsp;
         M&nbsp;·&nbsp;Map
@@ -436,6 +442,7 @@
   <script type="module" src="js/inventory.js"></script>
   <script type="module" src="js/shop.js"></script>
   <script type="module" src="js/game.js"></script>
+
 
 
 
