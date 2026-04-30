@@ -67,7 +67,10 @@
     <div class="hud hud-tl" id="hudPlayer">
       <div class="hud-avatar" id="hudAvatar"></div>
       <div class="hud-info">
-        <span class="hud-name" id="hudName">—</span>
+        <div style="display:flex;align-items:center;gap:5px">
+          <span class="hud-name" id="hudName">—</span>
+          <span class="prestige-badge" id="prestigeBadge"></span>
+        </div>
         <span class="hud-pos" id="hudPos">0, 0, 0</span>
         <span class="hud-zone" id="hudZone">Plains</span>
       </div>
@@ -138,6 +141,7 @@
         <button id="btnSettings" class="hud-icon-btn" title="Settings (ESC)" aria-label="Open settings">⚙</button>
         <button id="btnCharacter" class="hud-icon-btn" title="Character customisation" aria-label="Open character editor">👤</button>
         <button id="btnChallenges" class="hud-icon-btn" title="Daily Challenges (C)" aria-label="Open daily challenges">📋</button>
+        <button id="btnPrestige" class="hud-icon-btn" title="Prestige" aria-label="Open prestige">⭐</button>
       </div>
     </div>
 
@@ -495,6 +499,59 @@
     </div>
 
 
+    <!-- ── Part 6: Rare Item Toasts ──────────────────────────────── -->
+    <div id="rareItemToasts" class="rare-toast-container"></div>
+
+    <!-- ── Part 6: Prestige Overlay ──────────────────────────────── -->
+    <div id="prestigeOverlay" class="prestige-overlay hidden" role="dialog" aria-modal="true">
+      <div class="prestige-panel">
+        <div class="prestige-panel-header">
+          <span class="ps-title">⭐ Prestige</span>
+          <button class="ps-close-btn" id="psCloseBtn" aria-label="Close">✕</button>
+        </div>
+        <div class="ps-stats-row">
+          <div class="ps-stat-card">
+            <div class="ps-stat-val" id="psLevel">0</div>
+            <div class="ps-stat-lbl">Prestige Level</div>
+          </div>
+          <div class="ps-stat-card">
+            <div class="ps-stat-val" id="psMult">×1.0</div>
+            <div class="ps-stat-lbl">Coin Multiplier</div>
+          </div>
+          <div class="ps-stat-card">
+            <div class="ps-stat-val" id="psXP">0</div>
+            <div class="ps-stat-lbl">Prestige XP</div>
+          </div>
+        </div>
+        <div class="ps-xp-tier" id="psXPTier">Miner</div>
+        <div class="ps-progress-section">
+          <div class="ps-progress-labels">
+            <span id="psCoins">$0</span>
+            <span id="psProgressPct">0%</span>
+            <span id="psThresh">$10,000</span>
+          </div>
+          <div class="ps-progress-track"><div class="ps-progress-bar" id="psProgressBar"></div></div>
+        </div>
+        <div class="ps-req-item" id="psReqItem"></div>
+        <button class="ps-action-btn" id="psActionBtn" disabled="">⭐ Prestige</button>
+        <div class="ps-rare-section">
+          <div class="ps-rare-header">Rare Items</div>
+          <div class="ps-rare-list" id="psRareList"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Part 6: Prestige Ceremony ─────────────────────────────── -->
+    <div id="prestigeCeremony" class="prestige-ceremony hidden">
+      <div class="pc-inner">
+        <div class="pc-stars">⭐</div>
+        <div class="pc-level" id="pcLevel">P1</div>
+        <div class="pc-subtitle">Prestige Achieved!</div>
+        <div class="pc-mult" id="pcMult">+10% coin bonus active</div>
+        <button class="pc-close" id="pcCloseBtn">Continue</button>
+      </div>
+    </div>
+
   </div><!-- /#gameWrapper -->
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -510,6 +567,8 @@
   <script type="module" src="js/inventory.js"></script>
   <script type="module" src="js/shop.js"></script>
   <script type="module" src="js/aiContent.js"></script>
+  <script type="module" src="js/prestige.js"></script>
+  <script type="module" src="js/rareItems.js"></script>
   <script type="module" src="js/game.js"></script>
 
 
