@@ -29,7 +29,7 @@ import {
   sendChat,
   onChat,
 } from './network.js';
-import { onDig, getMoney, addMoney, getDepthAt, getMaterialAtDepth, ORES, rollOre, resetMining, generateOreDeposits,
+import { onDig, getMoney, addMoney, getDepthAt, getMaterialAtDepth, ORES, rollOre, resetMining, generateOreDeposits, generateOreVeins,
          initMining, tickParticles, tickCameraShake, triggerShake } from './mining.js';
 import { playerInventory, TOOLS } from './inventory.js';
 import { openShop, closeShop, isShopOpen, getNearestShop, setMoneyChangeCallback, SHOPS } from './shop.js';
@@ -167,6 +167,30 @@ let _digNotifTimer = null;
 let _nearestShop   = null;
 let _punchProgress = 0;  // 0..1 — drives progress ring on crosshair
 
+// ── Motherlode banner ─────────────────────────────────────────
+function _showMotherloadeBanner(ore, isGrand) {
+  const el = document.createElement('div');
+  el.style.cssText = [
+    'position:fixed','bottom:155px','left:50%','transform:translateX(-50%)',
+    'border-radius:10px','padding:10px 22px',
+    'font-family:inherit','font-size:15px','font-weight:700','color:#fff',
+    'pointer-events:none','z-index:401','opacity:0',
+    'transition:opacity 0.3s','white-space:nowrap','text-align:center',
+    `background:rgba(0,0,0,0.82)`,
+    `border:2px solid ${ore.hexColor}`,
+    `box-shadow:0 0 18px ${ore.hexColor}88`,
+  ].join(';');
+  el.innerHTML = isGrand
+    ? `🏆 GRAND MOTHERLODE! ${ore.emoji} ${ore.name} ×6 — 2× bonus!`
+    : `💥 Motherlode! ${ore.emoji} ${ore.name} ×4 — 1.5× bonus!`;
+  document.body.appendChild(el);
+  requestAnimationFrame(() => { el.style.opacity = '1'; });
+  setTimeout(() => {
+    el.style.opacity = '0';
+    setTimeout(() => el.remove(), 400);
+  }, isGrand ? 5000 : 3500);
+}
+
 // ── Layer transition banner ───────────────────────────────────
 function _showLayerTransitionBanner(layer) {
   // Brief HUD flash + "You entered X — ⬇ Ym" message
@@ -290,6 +314,9 @@ async function init() {
 
   // Ask Gemini to seed ore deposit hot-spots for this session
   generateOreDeposits().catch(() => {});  // async, non-blocking
+
+  // Pre-generate vein cells for all layers (deterministic per session)
+  generateOreVeins(Date.now() & 0xFFFF);
 
   // Initialise the 20-minute reset countdown
   _resetSecondsLeft = RESET_DURATION;
@@ -497,8 +524,9 @@ async function _doTerrainReset() {
     player.onGround = false;
   }
 
-  // 4. Ask Gemini for a fresh ore deposit map
+  // 4. Ask Gemini for a fresh ore deposit map + regenerate veins
   await generateOreDeposits().catch(() => {});
+  generateOreVeins(Date.now() & 0xFFFF);
 
   // 5. Restart the countdown
   _resetSecondsLeft = RESET_DURATION;
@@ -1325,6 +1353,22 @@ function _performDig() {
   if (digResult.newLayer) {
     _showLayerTransitionBanner(digResult.newLayer);
     flashLayerColour(digResult.newLayer.hexColor);
+  }
+
+  // ── Motherlode announcements ─────────────────────────────
+  if (digResult.motherlode && digResult.ore) {
+    const { isMotherlode, isGrandMotherlode, minedCount, oreId } = digResult.motherlode;
+    const ore = digResult.ore;
+
+    if (isGrandMotherlode && minedCount === 6) {
+      // Exactly 6 = announce once to server chat
+      const msg = `🏆 ${sessionStorage.getItem('playerName') || 'A miner'} found a ${ore.name} motherlode at ${Math.round(digResult.depth)}m!`;
+      sendChat(msg).catch(() => {});
+      _showMotherloadeBanner(ore, true);
+    } else if (isMotherlode && minedCount === 4) {
+      // Hit 4 cells — local popup only
+      _showMotherloadeBanner(ore, false);
+    }
   }
 }
 
