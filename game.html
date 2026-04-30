@@ -459,13 +459,25 @@
             <button class="shop-close-btn" id="shopCloseBtn">✕</button>
           </div>
         </div>
-        <!-- Part 5: shop tabs -->
+        <!-- Part 8: 4-tab shop panel -->
         <div class="shop-tabs" id="shopTabs">
-          <button class="shop-tab active" data-shop-tab="stock">Current Stock</button>
-          <button class="shop-tab" data-shop-tab="daily">⭐ Daily Deals</button>
+          <button class="shop-tab active" data-shop-tab="consumable">🧨 Consumables</button>
+          <button class="shop-tab" data-shop-tab="upgrade">📡 Upgrades</button>
+          <button class="shop-tab" data-shop-tab="cosmetic">🎨 Cosmetics</button>
+          <button class="shop-tab" data-shop-tab="tools">⛏ Tools</button>
+          <button class="shop-tab" data-shop-tab="sell">💰 Sell</button>
+          <button class="shop-tab" data-shop-tab="daily">⭐ Daily</button>
         </div>
-        <!-- Stock panel (existing items) -->
-        <div class="shop-item-grid" id="shopStockGrid"></div>
+        <!-- Consumables panel -->
+        <div class="shop-item-grid" id="shopConsumableGrid"></div>
+        <!-- Upgrades panel -->
+        <div class="shop-item-grid hidden" id="shopUpgradeGrid"></div>
+        <!-- Cosmetics panel -->
+        <div class="shop-item-grid hidden" id="shopCosmeticGrid"></div>
+        <!-- Tools panel (legacy shovels/backpacks) -->
+        <div class="shop-item-grid hidden" id="shopToolsGrid"></div>
+        <!-- Sell panel -->
+        <div class="shop-item-grid hidden" id="shopSellPanel"></div>
         <!-- Daily Deals panel -->
         <div class="shop-daily-panel hidden" id="shopDailyPanel">
           <div class="shop-daily-header">
@@ -601,6 +613,19 @@
 
 
 
+
+    <!-- REPORT PLAYER MODAL (Part 8 — Layer 3 moderation) -->
+    <div id="reportModal" class="report-modal hidden">
+      <div class="report-modal-box">
+        <div class="report-modal-title">🚩 Report Player</div>
+        <div class="report-modal-name" id="reportTargetName"></div>
+        <div class="report-modal-reason">Reason: offensive username</div>
+        <div class="report-modal-btns">
+          <button id="reportConfirmBtn" class="report-confirm-btn">Send Report</button>
+          <button id="reportCancelBtn" class="report-cancel-btn">Cancel</button>
+        </div>
+      </div>
+    </div>
 
 
 </body></html>
