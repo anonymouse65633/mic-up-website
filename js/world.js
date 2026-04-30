@@ -1,5 +1,5 @@
 // ============================================================
-//  WalkWorld 3D — world.js  (with mining shaft system)
+//  WalkWorld 3D — world.js  (SPHERICAL MINING REWRITE)
 // ============================================================
 
 export const WORLD_SIZE = 200;
@@ -15,16 +15,20 @@ const HSTEP = WORLD_SIZE / SEGS;
 let _hmap = null;
 
 // ============================================================
-//  MINING SHAFT SYSTEM
+//  SPHERICAL MINING SYSTEM
 // ============================================================
-export const MINE_CELL     = 3.0;   // shaft width in world units
-export const DIG_PER_PUNCH = 1.2;   // depth per punch
-export const MAX_DIG_DEPTH = 120;   // max shaft depth
+export const MINE_CELL     = 3.0;
+export const DIG_SPHERE_R  = 2.6;   // sphere excavation radius
+export const DIG_PER_PUNCH = 1.2;
+export const MAX_DIG_DEPTH = 120;
+export const DIG_REACH     = 3.5;   // how far ahead to dig
 
-const _shafts = new Map();          // "cx,cz" -> { surfaceY, floorY, depth }
+const _shafts    = new Map();   // "cx,cz" -> { surfaceY, floorY, depth }
+const _sphereMap = new Map();   // "rx,rz" (1-unit) -> minY tracked
+
 let _terrainPosAttr = null;
 let _terrainGeo     = null;
-let _originalY      = null;         // backup of all vertex Y values for reset
+let _originalY      = null;
 
 function _shaftCX(x) { return Math.round(x / MINE_CELL); }
 function _shaftCZ(z) { return Math.round(z / MINE_CELL); }
@@ -99,13 +103,16 @@ function _bilinearHeight(x, z) {
   return h00*(1-tx)*(1-tz) + h10*tx*(1-tz) + h01*(1-tx)*tz + h11*tx*tz;
 }
 
-/** Surface height without shaft overrides (used by player jump calc). */
 export function getBaseHeightAt(x, z) {
   return _bilinearHeight(x, z);
 }
 
-/** Height at (x,z) — returns shaft floor if inside a dug shaft. */
 export function getHeightAt(x, z) {
+  // Check sphere excavation map first (fine resolution)
+  const mk = Math.round(x) + ',' + Math.round(z);
+  const minY = _sphereMap.get(mk);
+  if (minY !== undefined) return minY;
+
   const shaft = _getShaftAt(x, z);
   if (shaft) return shaft.floorY;
   return _bilinearHeight(x, z);
@@ -118,48 +125,54 @@ export function isBlocked(x, z) {
 }
 
 /**
- * Dig one punch deeper at world position (x, z).
- * Returns dig info object, or null if at max depth or invalid.
+ * Dig a smooth sphere at world position (digX, digY, digZ).
+ * digY is the sphere center. The bowl goes from surfaceY down to digY-radius.
  */
-export function digShaft(x, z) {
-  const cx = _shaftCX(x);
-  const cz = _shaftCZ(z);
-  const key = _shaftKey(cx, cz);
+export function digSphere(digX, digY, digZ, radius) {
+  if (getZoneName(digX, digZ) === 'Plaza') return null;
 
-  const worldX = cx * MINE_CELL;
-  const worldZ = cz * MINE_CELL;
-
-  // ── Plaza is indestructible — no digging allowed ──────────
-  if (getZoneName(worldX, worldZ) === 'Plaza') return null;
-
-  const surfaceY      = _bilinearHeight(worldX, worldZ);
-  const existing      = _shafts.get(key);
-  const currentFloorY = existing ? existing.floorY : surfaceY;
-  const newFloorY     = currentFloorY - DIG_PER_PUNCH;
-  const depth         = surfaceY - newFloorY;
+  const surfaceY = _bilinearHeight(digX, digZ);
+  const floorY   = digY - radius;
+  const depth    = surfaceY - floorY;
 
   if (depth > MAX_DIG_DEPTH) return null;
 
-  _shafts.set(key, { surfaceY, floorY: newFloorY, depth });
-  _excavateTerrainAt(cx, cz, newFloorY);
+  const cx  = _shaftCX(digX);
+  const cz  = _shaftCZ(digZ);
+  const key = _shaftKey(cx, cz);
+  const worldX = cx * MINE_CELL;
+  const worldZ = cz * MINE_CELL;
 
-  return { key, cellX: cx, cellZ: cz, worldX, worldZ, surfaceY, floorY: newFloorY, depth };
+  const existing  = _shafts.get(key);
+  const newFloorY = existing ? Math.min(existing.floorY, floorY) : floorY;
+  const newDepth  = surfaceY - newFloorY;
+
+  _shafts.set(key, { surfaceY, floorY: newFloorY, depth: newDepth });
+  _excavateSphere(digX, digY, digZ, radius);
+
+  return { key, cellX: cx, cellZ: cz, worldX, worldZ, surfaceY,
+           floorY: newFloorY, depth: newDepth, digX, digY, digZ, radius };
 }
 
-/** Returns shaft info for the cell containing (x, z), or null. */
-export function getShaftAt(x, z) {
-  return _getShaftAt(x, z);
+/** Legacy: dig straight down at (x,z) */
+export function digShaft(x, z) {
+  const surfaceY = _bilinearHeight(x, z);
+  const cx  = _shaftCX(x);
+  const cz  = _shaftCZ(z);
+  const key = _shaftKey(cx, cz);
+  const existing = _shafts.get(key);
+  const currentFloorY = existing ? existing.floorY : surfaceY;
+  const centerY = currentFloorY - DIG_PER_PUNCH * 0.5;
+  return digSphere(x, centerY, z, DIG_SPHERE_R);
 }
 
-/** Clear all shaft data (call before resetTerrain). */
+export function getShaftAt(x, z) { return _getShaftAt(x, z); }
+
 export function clearShafts() {
   _shafts.clear();
+  _sphereMap.clear();
 }
 
-/**
- * Restore the terrain mesh to its original un-dug state.
- * Call this together with clearShafts() and resetMining() for the 20-min reset.
- */
 export function resetTerrain() {
   if (!_terrainPosAttr || !_originalY) return;
   clearShafts();
@@ -170,19 +183,37 @@ export function resetTerrain() {
   _terrainGeo.computeVertexNormals();
 }
 
-function _excavateTerrainAt(cx, cz, floorY) {
+function _excavateSphere(cx, cy, cz, radius) {
   if (!_terrainPosAttr || !_terrainGeo) return;
+  const r2 = radius * radius;
+  let dirty = false;
+
   for (let i = 0; i < _terrainPosAttr.count; i++) {
     const vx = _terrainPosAttr.getX(i);
     const vz = _terrainPosAttr.getZ(i);
-    if (_shaftCX(vx) === cx && _shaftCZ(vz) === cz) {
-      if (_terrainPosAttr.getY(i) > floorY) {
-        _terrainPosAttr.setY(i, floorY);
+    const vy = _terrainPosAttr.getY(i);
+
+    const dx = vx - cx;
+    const dz = vz - cz;
+    const d2 = dx * dx + dz * dz;
+
+    if (d2 < r2) {
+      // Smooth hemisphere: bowl bottom = cy - sqrt(r² - dx² - dz²)
+      const bowlY = cy - Math.sqrt(r2 - d2);
+      if (vy > bowlY) {
+        _terrainPosAttr.setY(i, bowlY);
+        const mk = Math.round(vx) + ',' + Math.round(vz);
+        const prev = _sphereMap.get(mk);
+        if (prev === undefined || bowlY < prev) _sphereMap.set(mk, bowlY);
+        dirty = true;
       }
     }
   }
-  _terrainPosAttr.needsUpdate = true;
-  _terrainGeo.computeVertexNormals();
+
+  if (dirty) {
+    _terrainPosAttr.needsUpdate = true;
+    _terrainGeo.computeVertexNormals();
+  }
 }
 
 function _terrainColour(x, z, h) {
@@ -235,11 +266,9 @@ export function initWorld() {
   const terrainMesh = new THREE.Mesh(geoT, new THREE.MeshLambertMaterial({ vertexColors: true }));
   scene.add(terrainMesh);
 
-  // Store refs for dynamic shaft excavation
   _terrainPosAttr = posAttr;
   _terrainGeo     = geoT;
 
-  // Snapshot original vertex Y positions so resetTerrain() can restore them
   _originalY = new Float32Array(posAttr.count);
   for (let i = 0; i < posAttr.count; i++) {
     _originalY[i] = posAttr.getY(i);
