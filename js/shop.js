@@ -103,6 +103,12 @@ export function openShop(shopId) {
   _activeShop = shopId;
   _renderShop(shop);
   document.getElementById('shopOverlay')?.classList.remove('hidden');
+  // Always start on stock tab
+  _switchShopTab('stock');
+  // Kick off daily deals load (non-blocking)
+  _loadDailyDeals();
+  // Start reset timer tick
+  _tickDailyTimer();
 }
 
 export function closeShop() {
@@ -126,7 +132,7 @@ function _renderShop(shop) {
   overlay.querySelector('.shop-desc').textContent  = shop.desc;
   overlay.querySelector('.shop-money').textContent = `💰 $${money.toLocaleString()}`;
 
-  const grid = overlay.querySelector('.shop-item-grid');
+  const grid = overlay.querySelector('#shopStockGrid');
   grid.innerHTML = '';
 
   if (shop.id === 'sellStall') {
@@ -279,4 +285,146 @@ function _refreshAfterBuy() {
   if (_onMoneyChange) _onMoneyChange(money);
   // Re-render shop contents
   if (_activeShop) _renderShop(SHOPS[_activeShop]);
+}
+
+// ─────────────────────────────────────────────────────────────
+//  PART 5 — DAILY DEALS  (AI-powered daily shop tab)
+// ─────────────────────────────────────────────────────────────
+import { getDailyShopStock } from './aiContent.js';
+
+let _dailyTimerRaf = null;
+
+function _switchShopTab(tab) {
+  const stockGrid  = document.getElementById('shopStockGrid');
+  const dailyPanel = document.getElementById('shopDailyPanel');
+  document.querySelectorAll('.shop-tab').forEach(b => {
+    b.classList.toggle('active', b.dataset.shopTab === tab);
+  });
+  if (tab === 'daily') {
+    stockGrid?.classList.add('hidden');
+    dailyPanel?.classList.remove('hidden');
+  } else {
+    stockGrid?.classList.remove('hidden');
+    dailyPanel?.classList.add('hidden');
+  }
+}
+
+// Wire tab buttons — called once on first open
+let _tabsWired = false;
+function _wireTabs() {
+  if (_tabsWired) return;
+  _tabsWired = true;
+  document.querySelectorAll('[data-shop-tab]').forEach(btn => {
+    btn.addEventListener('click', () => _switchShopTab(btn.dataset.shopTab));
+  });
+}
+
+// Seconds until UTC midnight
+function _secsUntilMidnight() {
+  const now = new Date();
+  const midnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+  return Math.floor((midnight - now) / 1000);
+}
+
+function _tickDailyTimer() {
+  _wireTabs();
+  const el = document.getElementById('shopDailyTimer');
+  if (!el) return;
+  const secs = _secsUntilMidnight();
+  const h    = Math.floor(secs / 3600);
+  const m    = Math.floor((secs % 3600) / 60);
+  el.textContent = `Resets in ${h}h ${m}m`;
+  if (_dailyTimerRaf) cancelAnimationFrame(_dailyTimerRaf);
+  if (_isOpen) _dailyTimerRaf = requestAnimationFrame(_tickDailyTimer);
+}
+
+async function _loadDailyDeals() {
+  const grid = document.getElementById('shopDailyGrid');
+  if (!grid) return;
+
+  // Show spinner
+  grid.innerHTML = `
+    <div class="shop-daily-loading">
+      <div class="shop-daily-spinner"></div>
+      <span>Asking the merchant…</span>
+    </div>`;
+
+  // Gather player context
+  const depth    = window._playerDepthForShop ?? 0;
+  const prestige = window._playerPrestige     ?? 0;
+  const ownedIds = [];  // could pull from playerInventory if needed
+
+  try {
+    const items = await getDailyShopStock(depth, prestige, ownedIds);
+    grid.innerHTML = '';
+    _renderDailyItems(grid, items);
+  } catch {
+    grid.innerHTML = '<div class="shop-empty">Merchant is away — check back soon.</div>';
+  }
+}
+
+function _renderDailyItems(grid, items) {
+  const money = getMoney();
+
+  for (const item of items) {
+    const canAfford = money >= item.price;
+    const typeLabel = { consumable:'CONSUMABLE', upgrade:'UPGRADE', cosmetic:'COSMETIC', bundle:'BUNDLE' }[item.type] ?? item.type.toUpperCase();
+
+    const card = document.createElement('div');
+    card.className = 'shop-item-card daily-card';
+    card.style.borderTopColor = item.colorHex ?? '#445566';
+
+    const timerHtml = item.hoursLeft
+      ? `<div class="daily-timer">⏱ ${item.hoursLeft}h left</div>`
+      : '';
+
+    const bundleHtml = item.type === 'bundle' && item.items?.length
+      ? `<div class="daily-bundle-items">${item.items.map(i => `<span>${i.replace(/_/g,' ')}</span>`).join(' + ')}</div>`
+      : '';
+
+    card.innerHTML = `
+      <div class="daily-type-badge" style="background:${item.colorHex}22;color:${item.colorHex}">${typeLabel}</div>
+      <div class="shop-item-emoji">${item.emoji}</div>
+      <div class="shop-item-name">${item.name}</div>
+      <div class="shop-item-desc">${item.desc}</div>
+      ${bundleHtml}
+      ${timerHtml}
+      <button class="shop-buy-btn ${canAfford ? '' : 'disabled'}"
+              data-daily-buy="${item.id}"
+              data-daily-price="${item.price}"
+              data-daily-name="${item.name}"
+              data-daily-emoji="${item.emoji}"
+              ${canAfford ? '' : 'disabled'}>
+        ${canAfford ? `$${item.price.toLocaleString()}` : `$${item.price.toLocaleString()} — need more`}
+      </button>`;
+
+    grid.appendChild(card);
+  }
+
+  // Wire buy buttons
+  grid.querySelectorAll('[data-daily-buy]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const price = Number(btn.dataset.dailyPrice);
+      if (getMoney() < price) return;
+      addMoney(-price);
+      // Add to inventory as a generic consumable item
+      const event = new CustomEvent('daily-item-bought', {
+        detail: {
+          id:    btn.dataset.dailyBuy,
+          name:  btn.dataset.dailyName,
+          emoji: btn.dataset.dailyEmoji,
+          price,
+        },
+      });
+      window.dispatchEvent(event);
+      // Refresh money display
+      const moneyEl = document.querySelector('.shop-money');
+      if (moneyEl) moneyEl.textContent = `💰 $${getMoney().toLocaleString()}`;
+      if (_onMoneyChange) _onMoneyChange(getMoney());
+      // Mark button as owned
+      btn.textContent = '✓ PURCHASED';
+      btn.disabled    = true;
+      btn.classList.add('disabled');
+    });
+  });
 }
