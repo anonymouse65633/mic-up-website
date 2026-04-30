@@ -1,5 +1,5 @@
 // ============================================================
-//  WalkWorld 3D — mining.js  (SPHERICAL + DIRECTIONAL REWRITE)
+//  WalkWorld 3D — mining.js  (FIXED DIGGING)
 // ============================================================
 
 import { LAYERS, ORES, getMaterialAtDepth, rollOre } from './layers.js';
@@ -81,47 +81,29 @@ export function getDepthAt(x, z) {
 }
 
 // ============================================================
-//  MAIN DIG API  — now accepts look direction
+//  MAIN DIG API — always digs DOWN at player position
+//
+//  Instead of aiming a sphere in the look direction (which often
+//  misses the ground), we dig straight down from the player's
+//  current position. Each punch goes deeper than the last.
+//  This makes digging reliable and satisfying every time.
 // ============================================================
-/**
- * Perform one dig punch.
- * @param {number} px,py,pz  — player position (NOT eye position)
- * @param {number} yaw,pitch — camera orientation
- * @param {number} eyeHeight — camera height offset above player.y
- */
 export function onDig(px, py, pz, yaw, pitch, eyeHeight) {
-  eyeHeight = eyeHeight ?? 1.62;
-  yaw   = yaw   ?? 0;
-  pitch = pitch ?? -0.4;  // default: slightly looking down
+  // Find the current dig floor at this position
+  const surfaceY      = getBaseHeightAt(px, pz);
+  const shaft         = getShaftAt(px, pz);
+  const currentFloorY = shaft ? shaft.floorY : surfaceY;
 
-  // Eye position
-  const ex = px;
-  const ey = py + eyeHeight;
-  const ez = pz;
-
-  // Look direction vector (in this game: forward = +sinY, +cosZ)
-  const cosPitch = Math.cos(pitch);
-  const lx = Math.sin(yaw)  * cosPitch;
-  const ly = -Math.sin(pitch);
-  const lz = Math.cos(yaw)  * cosPitch;
-
-  // Dig target = eye + look * reach
-  const reach = DIG_REACH;
-  let   digX  = ex + lx * reach;
-  let   digY  = ey + ly * reach;
-  let   digZ  = ez + lz * reach;
-
-  // Clamp digY so we never dig above the surface (always deforms terrain)
-  const surfaceAtTarget = getBaseHeightAt(digX, digZ);
-  if (digY > surfaceAtTarget + 0.5) {
-    // Aim is too high — lower the sphere center to surface level
-    digY = surfaceAtTarget - DIG_SPHERE_R * 0.5;
-  }
+  // Sphere center sits just below the current floor so each dig
+  // pushes deeper. The sphere radius determines how wide the hole is.
+  const digX = px;
+  const digY = currentFloorY - (DIG_SPHERE_R * 0.45);
+  const digZ = pz;
 
   const result = digSphere(digX, digY, digZ, DIG_SPHERE_R);
   if (!result) return null;
 
-  const { key, cellX, cellZ, worldX, worldZ, floorY, depth, surfaceY } = result;
+  const { key, cellX, cellZ, worldX, worldZ, floorY, depth, surfaceY: sY } = result;
   const layer      = getMaterialAtDepth(depth);
   const depositHit = layer.name === 'Dense Ore' && _isDeposit(cellX, cellZ);
 
@@ -132,7 +114,7 @@ export function onDig(px, py, pz, yaw, pitch, eyeHeight) {
 
   _money += earned;
 
-  _updateSphereVisuals(key, digX, digY, digZ, DIG_SPHERE_R, depth, surfaceY, ore, layer);
+  _updateSphereVisuals(key, digX, digY, digZ, DIG_SPHERE_R, depth, sY, ore, layer);
 
   return { layer, ore, depth, earned, totalMoney: _money, isDeposit: depositHit };
 }
@@ -153,7 +135,7 @@ export function resetMining() {
 }
 
 // ============================================================
-//  SPHERE VISUALS — smooth bowl + realistic ore crystals
+//  SPHERE VISUALS — ore crystal clusters in holes
 // ============================================================
 function _updateSphereVisuals(key, cx, cy, cz, radius, depth, surfaceY, ore, layer) {
   const old = _sphereMeshes.get(key);
@@ -166,42 +148,40 @@ function _updateSphereVisuals(key, cx, cy, cz, radius, depth, surfaceY, ore, lay
   }
 
   const group = new THREE.Group();
+  const floorY = cy - radius;
 
-  // ── Sphere bowl indicator (subtle dark overlay) ────────────
-  // We use a half-sphere mesh sitting in the bowl to show strata bands
-  const bowlSegs = 12;
-  const floorY   = cy - radius;
-
-  // Strata layers visible in the bowl walls
+  // Strata layer rings — visible at the walls of the hole
   const visibleLayers = LAYERS.filter(l => {
     const bandTop    = surfaceY - l.minDepth;
     const bandBottom = surfaceY - Math.min(depth, l.maxDepth);
     return bandTop > bandBottom;
   });
 
-  // Render stratum rings as thin torus arcs in the bowl
   for (const vl of visibleLayers) {
     const bandTop    = surfaceY - vl.minDepth;
     const bandBottom = surfaceY - Math.min(depth, vl.maxDepth);
-    if (bandTop - bandBottom < 0.05) continue;
+    if (bandTop - bandBottom < 0.1) continue;
 
-    // Map band to sphere radius at that depth
     const midY = (bandTop + bandBottom) * 0.5;
-    const relY = midY - cy; // relative to sphere center
-    const clampedRelY = Math.max(-radius * 0.98, Math.min(radius * 0.98, relY));
+    const relY = midY - cy;
+    const clampedRelY = Math.max(-radius * 0.95, Math.min(radius * 0.95, relY));
     const ringR = Math.sqrt(Math.max(0, radius * radius - clampedRelY * clampedRelY));
 
-    if (ringR < 0.2) continue;
+    if (ringR < 0.3) continue;
 
-    const torusGeo = new THREE.TorusGeometry(ringR, 0.06, 6, 20, Math.PI * 2);
-    const torusMat = new THREE.MeshLambertMaterial({ color: vl.color, transparent: true, opacity: 0.7 });
+    const torusGeo = new THREE.TorusGeometry(ringR, 0.12, 6, 24, Math.PI * 2);
+    const torusMat = new THREE.MeshLambertMaterial({
+      color: vl.color,
+      transparent: true,
+      opacity: 0.85,
+    });
     const torus = new THREE.Mesh(torusGeo, torusMat);
     torus.rotation.x = Math.PI / 2;
     torus.position.set(cx, midY, cz);
     group.add(torus);
   }
 
-  // ── Ore crystal cluster ────────────────────────────────────
+  // Ore crystal cluster at the floor
   if (ore) {
     _buildOreCrystalCluster(group, cx, floorY + 0.05, cz, ore, depth);
   }
@@ -210,20 +190,14 @@ function _updateSphereVisuals(key, cx, cy, cz, radius, depth, surfaceY, ore, lay
   _sphereMeshes.set(key, { group });
 }
 
-/**
- * Build realistic ore crystal cluster.
- * Uses multiple ConeGeometry spires arranged in a cluster for a natural gemstone look.
- */
 function _buildOreCrystalCluster(group, cx, baseY, cz, ore, depth) {
   const rarity   = ore.rarity;
   const oreColor = ore.color;
   const emissive = new THREE.Color(oreColor);
 
-  // Number of crystals based on rarity
   const counts = { legendary: 9, epic: 7, rare: 5, uncommon: 4, common: 3 };
   const count  = counts[rarity] ?? 3;
 
-  // Size based on rarity
   const sizeBase = { legendary: 0.55, epic: 0.45, rare: 0.38, uncommon: 0.30, common: 0.22 };
   const baseSize = sizeBase[rarity] ?? 0.22;
 
@@ -233,7 +207,6 @@ function _buildOreCrystalCluster(group, cx, baseY, cz, ore, depth) {
     emissiveIntensity: rarity === 'legendary' ? 0.8 : rarity === 'epic' ? 0.65 : rarity === 'rare' ? 0.5 : rarity === 'uncommon' ? 0.35 : 0.2,
   });
 
-  // Scatter seed based on position
   let rngSeed = (Math.round(cx * 13 + cz * 7 + 1000)) >>> 0;
   const rng = () => {
     rngSeed = Math.imul(rngSeed, 1664525) + 1013904223 >>> 0;
@@ -242,41 +215,33 @@ function _buildOreCrystalCluster(group, cx, baseY, cz, ore, depth) {
 
   for (let i = 0; i < count; i++) {
     const angle  = (i / count) * Math.PI * 2 + rng() * 0.8;
-    const spread = i === 0 ? 0 : (0.1 + rng() * 0.55);  // center crystal + ring
+    const spread = i === 0 ? 0 : (0.1 + rng() * 0.55);
     const height = baseSize * (0.7 + rng() * 0.9);
     const width  = baseSize * (0.12 + rng() * 0.14);
-    const tilt   = rng() * 0.45;  // tilt away from center
+    const tilt   = rng() * 0.45;
 
     const geo  = new THREE.ConeGeometry(width, height, 5 + Math.floor(rng() * 3), 1);
-
-    // Double cone (crystal point at top AND bottom) for gem-like look
-    // Just use a cone pointing up, with a tiny inverted one below
     const mesh = new THREE.Mesh(geo, mat);
     const offsetX = Math.cos(angle) * spread;
     const offsetZ = Math.sin(angle) * spread;
     mesh.position.set(cx + offsetX, baseY + height * 0.5, cz + offsetZ);
-
-    // Tilt outward slightly
     mesh.rotation.z =  Math.cos(angle) * tilt;
     mesh.rotation.x = -Math.sin(angle) * tilt;
-
     group.add(mesh);
 
-    // Small base nub underneath each crystal
     if (rarity !== 'common') {
       const nubGeo  = new THREE.ConeGeometry(width * 0.7, height * 0.25, 5, 1);
       const nub     = new THREE.Mesh(nubGeo, mat);
       nub.position.set(cx + offsetX, baseY + height * 0.08, cz + offsetZ);
       nub.rotation.z = mesh.rotation.z;
       nub.rotation.x = mesh.rotation.x;
-      nub.rotation.y = Math.PI;  // flip — points down
+      nub.rotation.y = Math.PI;
       group.add(nub);
     }
   }
 
-  // For legendary/epic add a glowing point light
   if (rarity === 'legendary' || rarity === 'epic') {
-    const light = new THREE.PointLight(oreColor, rarity === 'legendary' ? 1.8 : 1.0, 6);
+    const light = new THREE.PointLight(oreColor, rarity === 'legendary' ? 1.8 : 1.0, 8);
     light.position.set(cx, baseY + baseSize, cz);
     group.add(light);
   }
