@@ -18,10 +18,10 @@ let _hmap = null;
 // ============================================================
 //  MINING SYSTEM
 // ============================================================
-export const MINE_CELL     = 3.0;
-export const DIG_SPHERE_R  = 5.0;   // big sphere = visible holes
-export const DIG_PER_PUNCH = 2.2;   // how much deeper each punch goes
-export const MAX_DIG_DEPTH = 200;
+export const MINE_CELL     = 4.0;    // wider cells → holes don't merge
+export const DIG_SPHERE_R  = 2.3;   // tight shaft radius — carves, not craters
+export const DIG_PER_PUNCH = 1.2;   // smaller step per digSphere call
+export const MAX_DIG_DEPTH = 300;
 export const DIG_REACH     = 3.5;
 
 const _shafts    = new Map();   // "cx,cz" -> { surfaceY, floorY, depth }
