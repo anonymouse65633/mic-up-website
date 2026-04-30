@@ -1,48 +1,55 @@
 // ============================================================
-//  WalkWorld 3D — aiContent.js  (PART 5)
+//  WalkWorld 3D — aiContent.js  (PART 5 — Gemini Edition)
 //
-//  Centralised AI content layer using the Anthropic API.
-//  All calls are cached in sessionStorage so the same request
-//  is never made twice in one session (or across UTC days for
-//  the daily shop). Falls back gracefully if the API is down.
+//  All AI calls now use Google Gemini (gemini-2.0-flash).
+//  Gemini supports browser-side CORS, so no proxy needed.
+//  API key is injected from GitHub Secrets via config.js.
 //
 //  Exports:
 //  ─────────────────────────────────────────────────────────
 //  getChestLoot(depth, coins, prestige, tier)
-//    → { ore_id, ore_count, bonus_coins, flavour_text }
-//
 //  getCabinLore(cabinKey, depth)
-//    → string  (lore paragraph for the miner's sign)
-//
 //  getOreDesc(oreId, rarity)
-//    → string  (one-line discovery description)
-//
 //  getDailyShopStock(depth, prestige, ownedIds)
-//    → DailyItem[]  (AI-curated shop items, cached until UTC midnight)
-//
-//  DailyItem shape:
-//    { id, name, emoji, desc, price, type, colorHex?,
-//      hoursLeft?, items?, effect? }
+//  getDailyChallenges(depth, prestige)
+//  getDepositHint(depth, layerName, recentOreIds, detectorTier)
 // ============================================================
 
-const API_URL = 'https://api.anthropic.com/v1/messages';
-const MODEL   = 'claude-sonnet-4-20250514';
+import { GEMINI_API_KEY } from './config.js';
 
-// ── Shared Claude fetch helper ────────────────────────────────
-async function _claude(systemPrompt, userPrompt, maxTokens = 300) {
-  const res = await fetch(API_URL, {
+const GEMINI_MODEL    = 'gemini-2.0-flash';
+const GEMINI_ENDPOINT = () =>
+  `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+
+// ── Shared Gemini fetch helper ────────────────────────────────
+async function _gemini(systemPrompt, userPrompt, maxTokens = 300) {
+  // Bail early if API key isn't configured yet
+  if (!GEMINI_API_KEY || GEMINI_API_KEY.startsWith('REPLACE_WITH')) {
+    throw new Error('Gemini API key not configured');
+  }
+
+  const res = await fetch(GEMINI_ENDPOINT(), {
     method : 'POST',
     headers: { 'Content-Type': 'application/json' },
     body   : JSON.stringify({
-      model     : MODEL,
-      max_tokens: maxTokens,
-      system    : systemPrompt,
-      messages  : [{ role: 'user', content: userPrompt }],
+      contents: [{
+        parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }],
+      }],
+      generationConfig: {
+        temperature     : 0.9,
+        maxOutputTokens : maxTokens,
+      },
     }),
   });
-  if (!res.ok) throw new Error(`Claude API ${res.status}`);
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => res.status);
+    throw new Error(`Gemini HTTP ${res.status}: ${errText}`);
+  }
+
   const data = await res.json();
-  return (data.content?.[0]?.text ?? '').replace(/```[\w]*\n?/g, '').trim();
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+  return text.replace(/```[\w]*\n?/g, '').trim();
 }
 
 // ── sessionStorage helpers ────────────────────────────────────
@@ -53,9 +60,8 @@ function _set(key, value) {
   try { sessionStorage.setItem(key, JSON.stringify(value)); } catch {}
 }
 
-// Seconds until UTC midnight — for daily shop cache
 function _secsUntilMidnight() {
-  const now  = new Date();
+  const now      = new Date();
   const midnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
   return Math.floor((midnight - now) / 1000);
 }
@@ -80,23 +86,18 @@ function _chestFallback(depth) {
   return CHEST_FALLBACKS.void;
 }
 
-/**
- * getChestLoot(depth, coins, prestige, tier)
- * Returns { ore_id, ore_count, bonus_coins, flavour_text }
- * Cached per (tier, depth-band) within the session.
- */
 export async function getChestLoot(depth, coins, prestige, tier) {
-  const band    = Math.floor(depth / 30) * 30;    // quantise to 30m bands
+  const band     = Math.floor(depth / 30) * 30;
   const cacheKey = `ww_chest_${tier}_${band}`;
   const cached   = _get(cacheKey);
   if (cached) return cached;
 
   const ORES_BY_DEPTH =
-    depth < 15  ? 'coal, copper'        :
-    depth < 45  ? 'copper, iron, tin'   :
-    depth < 70  ? 'iron, gold, emerald' :
-    depth < 120 ? 'sapphire, ruby'      :
-    depth < 180 ? 'amethyst, diamond'   :
+    depth < 15  ? 'coal, copper'                    :
+    depth < 45  ? 'copper, iron, tin'               :
+    depth < 70  ? 'iron, gold, emerald'             :
+    depth < 120 ? 'sapphire, ruby'                  :
+    depth < 180 ? 'amethyst, diamond'               :
                   'diamond, void_crystal, sunstone';
 
   const system = 'You are a loot generator for WalkWorld 3D, a 3D multiplayer mining game. Return ONLY valid JSON — no markdown, no extra text.';
@@ -106,9 +107,8 @@ export async function getChestLoot(depth, coins, prestige, tier) {
     `Return exactly: {"ore_id":"<one of the listed ores>","ore_count":<1-4>,"bonus_coins":<10-500>,"flavour_text":"<one evocative sentence max 12 words>"}`;
 
   try {
-    const raw    = await _claude(system, user, 180);
+    const raw    = await _gemini(system, user, 180);
     const result = JSON.parse(raw);
-    // Validate shape
     if (!result.ore_id || typeof result.bonus_coins !== 'number') throw new Error('bad shape');
     result.ore_count   = Math.max(1, Math.min(4, result.ore_count ?? 1));
     result.bonus_coins = Math.max(5, Math.min(800, result.bonus_coins));
@@ -136,12 +136,6 @@ const CABIN_LORE_FALLBACKS = [
 
 let _cabinFallbackIdx = 0;
 
-/**
- * getCabinLore(cabinKey, depth)
- * cabinKey: string like "cabin_12_-8" (cx_cz for uniqueness)
- * Returns a lore paragraph for the miner's sign.
- * Cached per cabin key within the session.
- */
 export async function getCabinLore(cabinKey, depth) {
   const cacheKey = `ww_cabin_${cabinKey}`;
   const cached   = _get(cacheKey);
@@ -157,13 +151,13 @@ export async function getCabinLore(cabinKey, depth) {
 
   const system = 'You are a writer for WalkWorld 3D, a multiplayer mining game. Write immersive in-world text. Be concise.';
   const user   =
-    `Write a 2-sentence miner\'s log for an underground cabin at ${depth}m in the ${layerName} layer. ` +
+    `Write a 2-sentence miner's log for an underground cabin at ${depth}m in the ${layerName} layer. ` +
     `Hint at something interesting nearby (a vein, a creature noise, a mysterious structure). ` +
     `Write in first person, past tense. Max 28 words total. No quotes.`;
 
   try {
-    const lore = await _claude(system, user, 120);
-    const clean = lore.replace(/^["']|["']$/g, '').trim();
+    const lore  = await _gemini(system, user, 120);
+    const clean = lore.replace(/^[\"']|[\"']$/g, '').trim();
     _set(cacheKey, clean);
     return clean;
   } catch {
@@ -192,11 +186,6 @@ const ORE_DESC_FALLBACKS = {
   sunstone    : 'Warm, impossibly bright — like holding a captured star.',
 };
 
-/**
- * getOreDesc(oreId, rarity)
- * Returns a one-line discovery description.
- * Cached per oreId within the session.
- */
 export async function getOreDesc(oreId, rarity) {
   const cacheKey = `ww_oredesc_${oreId}`;
   const cached   = _get(cacheKey);
@@ -208,8 +197,8 @@ export async function getOreDesc(oreId, rarity) {
     `Max 10 words. No ore name in the line. No punctuation at end. Evocative, sensory.`;
 
   try {
-    const desc  = await _claude(system, user, 80);
-    const clean = desc.replace(/^["'—\-\s]+|["'—\-\s]+$/g, '').trim();
+    const desc  = await _gemini(system, user, 80);
+    const clean = desc.replace(/^[\"'—\-\s]+|[\"'—\-\s]+$/g, '').trim();
     _set(cacheKey, clean);
     return clean;
   } catch {
@@ -223,7 +212,6 @@ export async function getOreDesc(oreId, rarity) {
 //  4. DAILY SHOP STOCK
 // ============================================================
 
-// Cache key includes today's UTC date so it resets at midnight
 function _dailyCacheKey(depth, prestige) {
   const d = new Date();
   const dateStr = `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
@@ -232,28 +220,22 @@ function _dailyCacheKey(depth, prestige) {
 }
 
 const DAILY_FALLBACKS = [
-  { id:'ore_magnet_5',  name:'Ore Magnet',        emoji:'🧲', desc:'Triple ore roll chance for 5 minutes.',          price:1200, type:'consumable', colorHex:'#cc4444', effect:'ore_magnet', hoursLeft:24 },
-  { id:'depth_boots',   name:'Depth Boots',        emoji:'👢', desc:'+20% move speed underground.',                   price:500,  type:'upgrade',    colorHex:'#4488cc', effect:'depth_boots',hoursLeft:24 },
-  { id:'dynamite_3',    name:'Dynamite ×3',        emoji:'💣', desc:'Instant 4-punch dig. Satisfying.',              price:320,  type:'consumable', colorHex:'#dd6622', effect:'dynamite',   hoursLeft:18 },
-  { id:'headlamp',      name:'Headlamp',            emoji:'🔦', desc:'Player spotlight — needed below 65m.',          price:200,  type:'upgrade',    colorHex:'#ffdd44', effect:'headlamp',   hoursLeft:24 },
-  { id:'void_magnet',   name:'Void Magnet',         emoji:'🌀', desc:'5× rare ore chance for 3 minutes.',            price:5000, type:'consumable', colorHex:'#9900ff', effect:'void_magnet',hoursLeft:12 },
-  { id:'mystery_bundle',name:'Mystery Bundle',      emoji:'🎁', desc:'3 items chosen for your current depth.',        price:380,  type:'bundle',     colorHex:'#3366aa', items:['dynamite_3','ore_magnet_5','headlamp'], hoursLeft:6 },
-  { id:'moonstone_skin',name:'Moonstone Pick Skin', emoji:'🌙', desc:'Soft blue glow on every dig. Cosmetic only.',   price:800,  type:'cosmetic',   colorHex:'#aaccff', hoursLeft:12 },
-  { id:'crystal_helm',  name:'Crystal Helm',        emoji:'💠', desc:'Geo crystal crafted into a wearable hat.',     price:1500, type:'cosmetic',   colorHex:'#00dddd', hoursLeft:24 },
+  { id:'ore_magnet_5',  name:'Ore Magnet',        emoji:'🧲', desc:'Triple ore roll chance for 5 minutes.',        price:1200, type:'consumable', colorHex:'#cc4444', effect:'ore_magnet',  hoursLeft:24 },
+  { id:'depth_boots',   name:'Depth Boots',        emoji:'👢', desc:'+20% move speed underground.',                 price:500,  type:'upgrade',    colorHex:'#4488cc', effect:'depth_boots', hoursLeft:24 },
+  { id:'dynamite_3',    name:'Dynamite ×3',        emoji:'💣', desc:'Instant 4-punch dig. Satisfying.',            price:320,  type:'consumable', colorHex:'#dd6622', effect:'dynamite',    hoursLeft:18 },
+  { id:'headlamp',      name:'Headlamp',            emoji:'🔦', desc:'Player spotlight — needed below 65m.',        price:200,  type:'upgrade',    colorHex:'#ffdd44', effect:'headlamp',    hoursLeft:24 },
+  { id:'void_magnet',   name:'Void Magnet',         emoji:'🌀', desc:'5× rare ore chance for 3 minutes.',          price:5000, type:'consumable', colorHex:'#9900ff', effect:'void_magnet', hoursLeft:12 },
+  { id:'mystery_bundle',name:'Mystery Bundle',      emoji:'🎁', desc:'3 items chosen for your current depth.',      price:380,  type:'bundle',     colorHex:'#3366aa', items:['dynamite_3','ore_magnet_5','headlamp'], hoursLeft:6 },
+  { id:'moonstone_skin',name:'Moonstone Pick Skin', emoji:'🌙', desc:'Soft blue glow on every dig. Cosmetic only.', price:800,  type:'cosmetic',   colorHex:'#aaccff', hoursLeft:12 },
+  { id:'crystal_helm',  name:'Crystal Helm',        emoji:'💠', desc:'Geo crystal crafted into a wearable hat.',   price:1500, type:'cosmetic',   colorHex:'#00dddd', hoursLeft:24 },
 ];
 
-/**
- * getDailyShopStock(depth, prestige, ownedIds)
- * Returns DailyItem[] — AI-curated shop items for the player.
- * Cached per (depth-band, prestige, UTC date) — resets at midnight.
- */
 export async function getDailyShopStock(depth, prestige, ownedIds = []) {
   const cacheKey = _dailyCacheKey(depth, prestige);
   const cached   = _get(cacheKey);
   if (cached) return cached;
 
   const hoursLeft = Math.ceil(_secsUntilMidnight() / 3600);
-
   const layerName =
     depth < 18  ? 'Clay'       :
     depth < 42  ? 'Stone'      :
@@ -276,7 +258,7 @@ export async function getDailyShopStock(depth, prestige, ownedIds = []) {
     `For bundles also add "items":["id1","id2","id3"]. No commentary.`;
 
   try {
-    const raw    = await _claude(system, user, 600);
+    const raw    = await _gemini(system, user, 600);
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed) || parsed.length < 3) throw new Error('bad shape');
     const items = parsed.slice(0, 8).map(item => ({
@@ -300,34 +282,13 @@ export async function getDailyShopStock(depth, prestige, ownedIds = []) {
 }
 
 // ============================================================
-//  5. DAILY CHALLENGES  (Part 5 — used by Part 6 Plaza board)
+//  5. DAILY CHALLENGES
 // ============================================================
 
-// Challenge types the game can track
-// type: 'find_ore'    → { ore_id, count }
-// type: 'reach_depth' → { depth }
-// type: 'mine_count'  → { count }          (any ore)
-// type: 'earn_coins'  → { coins }
-
 const CHALLENGE_FALLBACKS = [
-  {
-    id: 'ch_coal_rush', emoji: '⛏', title: 'Coal Rush',
-    description: 'Mine 15 Coal ore today.',
-    type: 'mine_count', count: 15, ore_id: 'coal',
-    reward_coins: 120, reward_desc: '+120 coins',
-  },
-  {
-    id: 'ch_go_deep', emoji: '⬇', title: 'Go Deep',
-    description: 'Reach 40m underground.',
-    type: 'reach_depth', depth: 40,
-    reward_coins: 200, reward_desc: '+200 coins',
-  },
-  {
-    id: 'ch_earn_500', emoji: '💰', title: 'Day\'s Pay',
-    description: 'Earn 500 coins in a single session.',
-    type: 'earn_coins', coins: 500,
-    reward_coins: 100, reward_desc: '+100 coins',
-  },
+  { id:'ch_coal_rush', emoji:'⛏', title:'Coal Rush', description:'Mine 15 Coal ore today.', type:'mine_count', count:15, ore_id:'coal', reward_coins:120, reward_desc:'+120 coins' },
+  { id:'ch_go_deep',   emoji:'⬇', title:'Go Deep',   description:'Reach 40m underground.', type:'reach_depth', depth:40, reward_coins:200, reward_desc:'+200 coins' },
+  { id:'ch_earn_500',  emoji:'💰', title:"Day's Pay", description:'Earn 500 coins in one session.', type:'earn_coins', coins:500, reward_coins:100, reward_desc:'+100 coins' },
 ];
 
 function _dailyChallengeCacheKey(prestige) {
@@ -336,15 +297,6 @@ function _dailyChallengeCacheKey(prestige) {
   return `ww_challenges_${ds}_p${prestige || 0}`;
 }
 
-/**
- * getDailyChallenges(depth, prestige)
- * Returns Challenge[] — 3 AI-generated daily challenges.
- * Cached per (prestige tier, UTC date).
- *
- * Challenge shape:
- *   { id, emoji, title, description, type, reward_coins, reward_desc,
- *     ore_id?, count?, depth?, coins? }
- */
 export async function getDailyChallenges(depth, prestige) {
   const cacheKey = _dailyChallengeCacheKey(prestige);
   const cached   = _get(cacheKey);
@@ -359,12 +311,12 @@ export async function getDailyChallenges(depth, prestige) {
     depth < 250 ? 'Dense Ore'  : 'The Void';
 
   const availableOres =
-    depth < 18  ? 'coal, copper'                         :
-    depth < 42  ? 'coal, copper, iron'                   :
-    depth < 65  ? 'coal, iron, tin, gold'                :
-    depth < 110 ? 'iron, gold, emerald, sapphire'        :
-    depth < 160 ? 'gold, sapphire, ruby'                 :
-    depth < 250 ? 'ruby, amethyst, diamond'              : 'amethyst, diamond, void_crystal';
+    depth < 18  ? 'coal, copper'                        :
+    depth < 42  ? 'coal, copper, iron'                  :
+    depth < 65  ? 'coal, iron, tin, gold'               :
+    depth < 110 ? 'iron, gold, emerald, sapphire'       :
+    depth < 160 ? 'gold, sapphire, ruby'                :
+    depth < 250 ? 'ruby, amethyst, diamond'             : 'amethyst, diamond, void_crystal';
 
   const system =
     'You are a daily challenge generator for WalkWorld 3D, a 3D multiplayer mining game. ' +
@@ -376,35 +328,32 @@ export async function getDailyChallenges(depth, prestige) {
     `Generate exactly 3 daily challenges. Make them varied: one easy, one medium, one hard. ` +
     `Use these types: "find_ore" (needs ore_id + count), "reach_depth" (needs depth number), ` +
     `"mine_count" (needs count, any ore), "earn_coins" (needs coins amount). ` +
-    `Scale difficulty for this player's depth. Reward harder challenges more. ` +
     `Return a JSON array of 3 objects each with: ` +
     `{"id":"unique_snake_case","emoji":"<1 emoji>","title":"<3-4 words>","description":"<max 8 words>",` +
     `"type":"find_ore"|"reach_depth"|"mine_count"|"earn_coins",` +
-    `"ore_id":"<snake_case ore name, only for find_ore/mine_count>",` +
-    `"count":<number, for find_ore/mine_count>,"depth":<number, for reach_depth>,` +
-    `"coins":<number, for earn_coins>,"reward_coins":<50-800>,"reward_desc":"<+X coins>"}. ` +
-    `No commentary, no markdown.`;
+    `"ore_id":"<snake_case, only for find_ore/mine_count>",` +
+    `"count":<number>,"depth":<number>,"coins":<number>,"reward_coins":<50-800>,"reward_desc":"<+X coins>"}. ` +
+    `No commentary.`;
 
   try {
-    const raw    = await _claude(system, user, 500);
+    const raw    = await _gemini(system, user, 500);
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed) || parsed.length < 3) throw new Error('bad shape');
 
     const VALID_TYPES = ['find_ore', 'reach_depth', 'mine_count', 'earn_coins'];
     const challenges  = parsed.slice(0, 3).map((ch, i) => ({
-      id:           String(ch.id   || `ch_${i}_${Date.now()}`),
+      id:           String(ch.id || `ch_${i}_${Date.now()}`),
       emoji:        String(ch.emoji || '⛏'),
       title:        String(ch.title || 'Challenge'),
       description:  String(ch.description || ''),
       type:         VALID_TYPES.includes(ch.type) ? ch.type : 'mine_count',
-      ore_id:       ch.ore_id   ? String(ch.ore_id)   : undefined,
-      count:        ch.count    ? Math.max(1, Math.min(200, Number(ch.count)))   : undefined,
-      depth:        ch.depth    ? Math.max(5, Math.min(300, Number(ch.depth)))   : undefined,
-      coins:        ch.coins    ? Math.max(50, Math.min(50000, Number(ch.coins))): undefined,
+      ore_id:       ch.ore_id  ? String(ch.ore_id)                            : undefined,
+      count:        ch.count   ? Math.max(1,   Math.min(200,   Number(ch.count)))   : undefined,
+      depth:        ch.depth   ? Math.max(5,   Math.min(300,   Number(ch.depth)))   : undefined,
+      coins:        ch.coins   ? Math.max(50,  Math.min(50000, Number(ch.coins)))   : undefined,
       reward_coins: Math.max(50, Math.min(800, Number(ch.reward_coins) || 150)),
       reward_desc:  String(ch.reward_desc || '+150 coins'),
     }));
-
     _set(cacheKey, challenges);
     return challenges;
   } catch {
@@ -414,7 +363,7 @@ export async function getDailyChallenges(depth, prestige) {
 }
 
 // ============================================================
-//  6. DEPOSIT INTELLIGENCE  (Ore Detector AI hint)
+//  6. DEPOSIT INTELLIGENCE
 // ============================================================
 
 const DEPOSIT_HINT_FALLBACKS = [
@@ -425,29 +374,19 @@ const DEPOSIT_HINT_FALLBACKS = [
   'Signal weak — try a different direction.',
 ];
 
-let _depositFallbackIdx = 0;
+let _depositFallbackIdx   = 0;
+let _lastDepositHintTime  = 0;
+let _lastDepositHintText  = null;
 
-// Throttle: one AI call per 90s maximum (avoid spamming)
-let _lastDepositHintTime = 0;
-let _lastDepositHintText = null;
-
-/**
- * getDepositHint(depth, layerName, recentOreIds, detectorTier)
- * Returns a short AI-generated hint string about nearby ores.
- * Cached for 90s to avoid repeated calls while exploring.
- * detectorTier: 1 = "distance only", 2 = "type + distance", 3 = "vein detail"
- */
 export async function getDepositHint(depth, layerName, recentOreIds = [], detectorTier = 1) {
   const now = Date.now();
-
-  // Use cached hint if within 90 seconds
   if (_lastDepositHintText && (now - _lastDepositHintTime) < 90_000) {
     return _lastDepositHintText;
   }
 
   const detailLevel =
-    detectorTier >= 3 ? 'Include the ore type and hint at vein size (small/large).'  :
-    detectorTier >= 2 ? 'Include the ore type but not exact amounts.'                :
+    detectorTier >= 3 ? 'Include the ore type and hint at vein size (small/large).' :
+    detectorTier >= 2 ? 'Include the ore type but not exact amounts.'               :
                         'Do NOT name the ore type — only hint at distance/direction.';
 
   const recentCtx = recentOreIds.length
@@ -461,7 +400,7 @@ export async function getDepositHint(depth, layerName, recentOreIds = [], detect
     `Max 10 words. Sensor/technical tone with slight mystery. No punctuation at end.`;
 
   try {
-    const hint  = await _claude(system, user, 80);
+    const hint  = await _gemini(system, user, 80);
     const clean = hint.replace(/^["""''—\-\s]+|["""''—\-\s]+$/g, '').trim();
     _lastDepositHintTime = now;
     _lastDepositHintText = clean;
