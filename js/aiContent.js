@@ -298,3 +298,178 @@ export async function getDailyShopStock(depth, prestige, ownedIds = []) {
     return DAILY_FALLBACKS;
   }
 }
+
+// ============================================================
+//  5. DAILY CHALLENGES  (Part 5 — used by Part 6 Plaza board)
+// ============================================================
+
+// Challenge types the game can track
+// type: 'find_ore'    → { ore_id, count }
+// type: 'reach_depth' → { depth }
+// type: 'mine_count'  → { count }          (any ore)
+// type: 'earn_coins'  → { coins }
+
+const CHALLENGE_FALLBACKS = [
+  {
+    id: 'ch_coal_rush', emoji: '⛏', title: 'Coal Rush',
+    description: 'Mine 15 Coal ore today.',
+    type: 'mine_count', count: 15, ore_id: 'coal',
+    reward_coins: 120, reward_desc: '+120 coins',
+  },
+  {
+    id: 'ch_go_deep', emoji: '⬇', title: 'Go Deep',
+    description: 'Reach 40m underground.',
+    type: 'reach_depth', depth: 40,
+    reward_coins: 200, reward_desc: '+200 coins',
+  },
+  {
+    id: 'ch_earn_500', emoji: '💰', title: 'Day\'s Pay',
+    description: 'Earn 500 coins in a single session.',
+    type: 'earn_coins', coins: 500,
+    reward_coins: 100, reward_desc: '+100 coins',
+  },
+];
+
+function _dailyChallengeCacheKey(prestige) {
+  const d = new Date();
+  const ds = `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
+  return `ww_challenges_${ds}_p${prestige || 0}`;
+}
+
+/**
+ * getDailyChallenges(depth, prestige)
+ * Returns Challenge[] — 3 AI-generated daily challenges.
+ * Cached per (prestige tier, UTC date).
+ *
+ * Challenge shape:
+ *   { id, emoji, title, description, type, reward_coins, reward_desc,
+ *     ore_id?, count?, depth?, coins? }
+ */
+export async function getDailyChallenges(depth, prestige) {
+  const cacheKey = _dailyChallengeCacheKey(prestige);
+  const cached   = _get(cacheKey);
+  if (cached) return cached;
+
+  const layerName =
+    depth < 18  ? 'Clay'       :
+    depth < 42  ? 'Stone'      :
+    depth < 65  ? 'Sandstone'  :
+    depth < 110 ? 'Dark Stone' :
+    depth < 160 ? 'Obsidian'   :
+    depth < 250 ? 'Dense Ore'  : 'The Void';
+
+  const availableOres =
+    depth < 18  ? 'coal, copper'                         :
+    depth < 42  ? 'coal, copper, iron'                   :
+    depth < 65  ? 'coal, iron, tin, gold'                :
+    depth < 110 ? 'iron, gold, emerald, sapphire'        :
+    depth < 160 ? 'gold, sapphire, ruby'                 :
+    depth < 250 ? 'ruby, amethyst, diamond'              : 'amethyst, diamond, void_crystal';
+
+  const system =
+    'You are a daily challenge generator for WalkWorld 3D, a 3D multiplayer mining game. ' +
+    'Return ONLY valid JSON — no markdown, no extra text.';
+
+  const user =
+    `Player is at ${depth}m in the ${layerName} layer, prestige ${prestige || 0}. ` +
+    `Available ores at this depth: ${availableOres}. ` +
+    `Generate exactly 3 daily challenges. Make them varied: one easy, one medium, one hard. ` +
+    `Use these types: "find_ore" (needs ore_id + count), "reach_depth" (needs depth number), ` +
+    `"mine_count" (needs count, any ore), "earn_coins" (needs coins amount). ` +
+    `Scale difficulty for this player's depth. Reward harder challenges more. ` +
+    `Return a JSON array of 3 objects each with: ` +
+    `{"id":"unique_snake_case","emoji":"<1 emoji>","title":"<3-4 words>","description":"<max 8 words>",` +
+    `"type":"find_ore"|"reach_depth"|"mine_count"|"earn_coins",` +
+    `"ore_id":"<snake_case ore name, only for find_ore/mine_count>",` +
+    `"count":<number, for find_ore/mine_count>,"depth":<number, for reach_depth>,` +
+    `"coins":<number, for earn_coins>,"reward_coins":<50-800>,"reward_desc":"<+X coins>"}. ` +
+    `No commentary, no markdown.`;
+
+  try {
+    const raw    = await _claude(system, user, 500);
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length < 3) throw new Error('bad shape');
+
+    const VALID_TYPES = ['find_ore', 'reach_depth', 'mine_count', 'earn_coins'];
+    const challenges  = parsed.slice(0, 3).map((ch, i) => ({
+      id:           String(ch.id   || `ch_${i}_${Date.now()}`),
+      emoji:        String(ch.emoji || '⛏'),
+      title:        String(ch.title || 'Challenge'),
+      description:  String(ch.description || ''),
+      type:         VALID_TYPES.includes(ch.type) ? ch.type : 'mine_count',
+      ore_id:       ch.ore_id   ? String(ch.ore_id)   : undefined,
+      count:        ch.count    ? Math.max(1, Math.min(200, Number(ch.count)))   : undefined,
+      depth:        ch.depth    ? Math.max(5, Math.min(300, Number(ch.depth)))   : undefined,
+      coins:        ch.coins    ? Math.max(50, Math.min(50000, Number(ch.coins))): undefined,
+      reward_coins: Math.max(50, Math.min(800, Number(ch.reward_coins) || 150)),
+      reward_desc:  String(ch.reward_desc || '+150 coins'),
+    }));
+
+    _set(cacheKey, challenges);
+    return challenges;
+  } catch {
+    _set(cacheKey, CHALLENGE_FALLBACKS);
+    return CHALLENGE_FALLBACKS;
+  }
+}
+
+// ============================================================
+//  6. DEPOSIT INTELLIGENCE  (Ore Detector AI hint)
+// ============================================================
+
+const DEPOSIT_HINT_FALLBACKS = [
+  'Faint metallic resonance to your east.',
+  'Something dense lies below — keep digging.',
+  'Multiple signatures detected nearby.',
+  'The detector hums — ore cluster within 20m.',
+  'Signal weak — try a different direction.',
+];
+
+let _depositFallbackIdx = 0;
+
+// Throttle: one AI call per 90s maximum (avoid spamming)
+let _lastDepositHintTime = 0;
+let _lastDepositHintText = null;
+
+/**
+ * getDepositHint(depth, layerName, recentOreIds, detectorTier)
+ * Returns a short AI-generated hint string about nearby ores.
+ * Cached for 90s to avoid repeated calls while exploring.
+ * detectorTier: 1 = "distance only", 2 = "type + distance", 3 = "vein detail"
+ */
+export async function getDepositHint(depth, layerName, recentOreIds = [], detectorTier = 1) {
+  const now = Date.now();
+
+  // Use cached hint if within 90 seconds
+  if (_lastDepositHintText && (now - _lastDepositHintTime) < 90_000) {
+    return _lastDepositHintText;
+  }
+
+  const detailLevel =
+    detectorTier >= 3 ? 'Include the ore type and hint at vein size (small/large).'  :
+    detectorTier >= 2 ? 'Include the ore type but not exact amounts.'                :
+                        'Do NOT name the ore type — only hint at distance/direction.';
+
+  const recentCtx = recentOreIds.length
+    ? `Player recently found: ${[...new Set(recentOreIds)].join(', ')}.`
+    : 'Player has found no ore yet in this session.';
+
+  const system = 'You are the internal voice of an ore detector in WalkWorld 3D. Write atmospheric, terse sensor readouts.';
+  const user   =
+    `Detector tier: ${detectorTier}. Player depth: ${depth}m (${layerName} layer). ${recentCtx} ` +
+    `Write ONE short ore detector readout for what might be nearby. ${detailLevel} ` +
+    `Max 10 words. Sensor/technical tone with slight mystery. No punctuation at end.`;
+
+  try {
+    const hint  = await _claude(system, user, 80);
+    const clean = hint.replace(/^["""''—\-\s]+|["""''—\-\s]+$/g, '').trim();
+    _lastDepositHintTime = now;
+    _lastDepositHintText = clean;
+    return clean;
+  } catch {
+    const fb = DEPOSIT_HINT_FALLBACKS[_depositFallbackIdx++ % DEPOSIT_HINT_FALLBACKS.length];
+    _lastDepositHintTime = now;
+    _lastDepositHintText = fb;
+    return fb;
+  }
+}
