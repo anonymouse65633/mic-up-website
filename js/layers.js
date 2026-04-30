@@ -243,58 +243,59 @@ export const ORES = {
 //      unlikely the further you are from its home.
 // ─────────────────────────────────────────────────────────────
 const ORE_TABLE = {
+  // Total chance per punch shown in brackets after each layer header
+  // Keep total low so finding ore feels like a real discovery
+
   'Grass/Dirt': [
-    // Surface scratchings — only the odd coal seam or copper fleck
-    ['coal',   0.030],   //  3%
-    ['copper', 0.040],   //  1%
+    // ~1.5% total — almost nothing at the surface
+    ['coal',   0.012],   //  1.2%
+    ['copper', 0.015],   //  0.3%
   ],
 
   'Clay': [
-    // Copper is common here; iron starts appearing; tiny coal seams
-    ['coal',   0.100],   // 10%
-    ['copper', 0.240],   // 14%  ← copper home layer
-    ['iron',   0.270],   //  3%
+    // ~6% total — copper starts appearing, coal seams rare
+    ['coal',   0.020],   //  2%
+    ['copper', 0.048],   //  2.8%  ← copper home layer
+    ['iron',   0.060],   //  1.2%
   ],
 
   'Stone': [
-    // Coal and iron are abundant; copper trailing off; gold/amethyst faint
-    ['coal',    0.220],  // 22%  ← coal home layer
-    ['copper',  0.290],  //  7%  (still possible, less than Clay)
-    ['iron',    0.480],  // 19%  ← iron home layer
-    ['gold',    0.500],  //  2%  (rare here)
-    ['emerald', 0.504],  //  0.4%
-    ['ruby',    0.506],  //  0.2%
-    ['amethyst',0.508],  //  0.2%
-    ['diamond', 0.5085], //  0.05%
+    // ~12% total — coal & iron are findable but not guaranteed
+    ['coal',    0.055],  //  5.5%  ← coal home layer
+    ['copper',  0.075],  //  2%
+    ['iron',    0.115],  //  4%    ← iron home layer
+    ['gold',    0.120],  //  0.5%  (rare here)
+    ['emerald', 0.121],  //  0.1%
+    ['ruby',    0.122],  //  0.1%
+    ['amethyst',0.1225], //  0.05%
+    ['diamond', 0.1227], //  0.02%
     // void_crystal: not present at this depth
   ],
 
   'Dark Stone': [
-    // Coal/copper fade; iron still around; gold & emerald thrive;
-    // ruby/amethyst emerge; diamond becomes possible
-    ['coal',        0.040],  //  4%
-    ['copper',      0.055],  //  1.5%
-    ['iron',        0.120],  //  6.5%
-    ['gold',        0.280],  // 16%  ← gold home layer
-    ['emerald',     0.360],  //  8%  ← emerald home layer
-    ['ruby',        0.420],  //  6%  ← ruby home layer (starts here)
-    ['amethyst',    0.465],  //  4.5%
-    ['diamond',     0.477],  //  1.2%
-    ['void_crystal',0.478],  //  0.1%
+    // ~18% total — valuable ores start appearing, but still feel earned
+    ['coal',        0.012],  //  1.2%
+    ['copper',      0.018],  //  0.6%
+    ['iron',        0.038],  //  2%
+    ['gold',        0.085],  //  4.7%  ← gold home layer
+    ['emerald',     0.115],  //  3%    ← emerald home layer
+    ['ruby',        0.138],  //  2.3%  ← ruby home layer
+    ['amethyst',    0.153],  //  1.5%
+    ['diamond',     0.158],  //  0.5%
+    ['void_crystal',0.159],  //  0.1%
   ],
 
   'Dense Ore': [
-    // Surface ores rare; gold/emerald still good; ruby/amethyst peak;
-    // diamond & void crystal at their best
-    ['coal',        0.015],  //  1.5%
-    ['copper',      0.025],  //  1%
-    ['iron',        0.065],  //  4%
-    ['gold',        0.135],  //  7%
-    ['emerald',     0.205],  //  7%
-    ['ruby',        0.280],  //  7.5%  ← also home layer for ruby
-    ['amethyst',    0.370],  //  9%   ← amethyst home layer
-    ['diamond',     0.410],  //  4%   ← diamond home layer
-    ['void_crystal',0.425],  //  1.5% ← void_crystal home layer
+    // ~22% total — deep mining rewards, but still not trivial
+    ['coal',        0.008],  //  0.8%
+    ['copper',      0.013],  //  0.5%
+    ['iron',        0.028],  //  1.5%
+    ['gold',        0.058],  //  3%
+    ['emerald',     0.088],  //  3%
+    ['ruby',        0.120],  //  3.2%  ← also home layer
+    ['amethyst',    0.158],  //  3.8%  ← amethyst home layer
+    ['diamond',     0.175],  //  1.7%  ← diamond home layer
+    ['void_crystal',0.182],  //  0.7%  ← void_crystal home layer
   ],
 };
 
