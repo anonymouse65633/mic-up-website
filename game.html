@@ -137,6 +137,7 @@
       <div class="hud-icon-row">
         <button id="btnSettings" class="hud-icon-btn" title="Settings (ESC)" aria-label="Open settings">⚙</button>
         <button id="btnCharacter" class="hud-icon-btn" title="Character customisation" aria-label="Open character editor">👤</button>
+        <button id="btnChallenges" class="hud-icon-btn" title="Daily Challenges (C)" aria-label="Open daily challenges">📋</button>
       </div>
     </div>
 
@@ -461,6 +462,38 @@
         <div class="inv-grid" id="invGrid"></div>
       </div>
     </div>
+
+    <!-- ══════════════════════════════════════════════════
+         CHALLENGE BOARD OVERLAY  (C key / Plaza button)
+         ══════════════════════════════════════════════════ -->
+    <div id="challengeOverlay" class="challenge-overlay hidden" role="dialog" aria-modal="true" aria-label="Daily challenges">
+      <div class="challenge-panel">
+        <div class="challenge-header">
+          <div>
+            <span class="challenge-title">📋 Daily Challenges</span>
+            <span class="challenge-subtitle">Complete for bonus coins · Resets at midnight UTC</span>
+          </div>
+          <button class="challenge-close-btn" id="challengeCloseBtn" aria-label="Close challenges">✕</button>
+        </div>
+        <div id="challengeList" class="challenge-list">
+          <!-- Populated by game.js -->
+          <div class="challenge-loading">
+            <div class="challenge-spinner"></div>
+            <span>Generating today's challenges…</span>
+          </div>
+        </div>
+        <div class="challenge-footer">
+          <span id="challengeResetTimer" class="challenge-reset-timer">Resets in …</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Deposit Intelligence HUD (shown when Ore Detector equipped underground) ── -->
+    <div id="depositHintHud" class="deposit-hint-hud hidden" aria-live="polite">
+      <span class="dh-icon">📡</span>
+      <span id="depositHintText" class="dh-text">Scanning…</span>
+    </div>
+
 
   </div><!-- /#gameWrapper -->
 
