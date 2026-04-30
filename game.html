@@ -50,10 +50,8 @@
       <div class="ch-v"></div>
     </div>
     <!-- Progress ring — drawn by game.js when punching multi-hit layers -->
-    <canvas id="progressRingCanvas" width="72" height="72"
-      style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
-             pointer-events:none;z-index:200;opacity:0;transition:opacity 0.15s"
-      aria-hidden="true"></canvas>
+    <canvas id="progressRingCanvas" width="72" height="72" style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+             pointer-events:none;z-index:200;opacity:0;transition:opacity 0.15s" aria-hidden="true"></canvas>
 
     <!-- ══════════════════════════════════════════════════
          CoD-STYLE COMPASS BAR  (top centre)
@@ -430,7 +428,21 @@
             <button class="shop-close-btn" id="shopCloseBtn">✕</button>
           </div>
         </div>
-        <div class="shop-item-grid"></div>
+        <!-- Part 5: shop tabs -->
+        <div class="shop-tabs" id="shopTabs">
+          <button class="shop-tab active" data-shop-tab="stock">Current Stock</button>
+          <button class="shop-tab" data-shop-tab="daily">⭐ Daily Deals</button>
+        </div>
+        <!-- Stock panel (existing items) -->
+        <div class="shop-item-grid" id="shopStockGrid"></div>
+        <!-- Daily Deals panel -->
+        <div class="shop-daily-panel hidden" id="shopDailyPanel">
+          <div class="shop-daily-header">
+            <span class="shop-daily-title">⭐ Today's Deals</span>
+            <span class="shop-daily-timer" id="shopDailyTimer">Resets in …</span>
+          </div>
+          <div class="shop-item-grid" id="shopDailyGrid"></div>
+        </div>
       </div>
     </div>
 
@@ -464,7 +476,9 @@
   <script type="module" src="js/mining.js"></script>
   <script type="module" src="js/inventory.js"></script>
   <script type="module" src="js/shop.js"></script>
+  <script type="module" src="js/aiContent.js"></script>
   <script type="module" src="js/game.js"></script>
+
 
 
 
