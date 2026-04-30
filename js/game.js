@@ -28,12 +28,14 @@ import {
   getPlayerCount,
   sendChat,
   onChat,
+  reportPlayer,
+  validateDepthUpdate,
 } from './network.js';
 import { onDig, getMoney, addMoney, getDepthAt, getMaterialAtDepth, ORES, rollOre, resetMining, generateOreDeposits, generateOreVeins,
          initMining, tickParticles, tickCameraShake, triggerShake,
          tickOreCrystals } from './mining.js';
 import { playerInventory, TOOLS } from './inventory.js';
-import { openShop, closeShop, isShopOpen, getNearestShop, setMoneyChangeCallback, SHOPS } from './shop.js';
+import { openShop, closeShop, isShopOpen, getNearestShop, setMoneyChangeCallback, SHOPS, isUpgradeOwned } from './shop.js';
 import {
   buildCharacter,
   getLocalCharConfig,
@@ -44,18 +46,18 @@ import {
 // ── Part 2 systems ───────────────────────────────────────────
 import {
   initAtmosphere, tickAtmosphere, setHeadlampOwned, flashLayerColour,
-} from './atmosphere.js';
+} from './Atmosphere.js';
 
 import {
   initCaves, tickCaves, setOnChestOpen, onInteractKey as cavesInteract,
   spawnMeteor, getCaveData,
-} from './caves.js';
+} from './Caves.js';
 
 import {
   initWorldEvents, tickEvents,
   getOreRushMultiplier, getVoidSurgeActive, getMeteorSiteBonus,
   getActiveEventSummary, getMeteorMinimapMarker,
-} from './events.js';
+} from './Events.js';
 
 // ── Part 5: AI Content ───────────────────────────────────────
 import { getChestLoot, getCabinLore, getOreDesc, getDailyChallenges, getDepositHint } from './aiContent.js';
@@ -642,6 +644,8 @@ function updateHUD() {
 
   // Expose depth for daily shop AI call
   window._playerDepthForShop = getDepthAt(player.x, player.z);
+  // Part 8: validate depth update (anti-cheat)
+  validateDepthUpdate(window._playerDepthForShop);
 
   // Part 5: Track depth for reach_depth challenges (throttled — every 20 frames)
   if (!window._challengeDepthTick) window._challengeDepthTick = 0;
@@ -1243,14 +1247,58 @@ function _updateInvCapacityUI() {
 }
 
 // ============================================================
-//  SHOP SYSTEM  (Part 4)
+//  SHOP SYSTEM  (Part 4 / Part 8)
 // ============================================================
 function setupShop() {
   document.getElementById('shopCloseBtn')?.addEventListener('click', closeShop);
-
   setMoneyChangeCallback(money => _updateMoneyHUD(money));
 
-}
+  // Part 8: handle depth-gated item purchases
+  window.addEventListener('shop-item-bought', e => {
+    const { id, name, emoji } = e.detail;
+    // Show HUD notification
+    _showOreBadge(`${emoji} ${name} purchased!`, '#00ff88');
+    // Apply immediate effects
+    if (id === 'ore_magnet')  window._oreMagnetActive = Date.now() + 5 * 60000;
+    if (id === 'void_magnet') window._voidMagnetActive = Date.now() + 3 * 60000;
+    if (id === 'dynamite')    window._dynamiteCount = (window._dynamiteCount || 0) + 1;
+    if (id === 'cluster_bomb') window._clusterBombCount = (window._clusterBombCount || 0) + 1;
+    if (id === 'depth_boots') window._depthBootsOwned = true;
+    if (id === 'waypoint')    window._waypointCount = (window._waypointCount || 0) + 1;
+    if (id === 'headlamp')    window._headlampOwned  = true;
+    if (id === 'lantern')     window._lanternOwned   = true;
+    if (id === 'void_torch')  window._voidTorchOwned = true;
+    if (id.startsWith('detector_')) {
+      const tier = parseInt(id.slice(-1));
+      window._oreDetectorTier = Math.max(window._oreDetectorTier || 0, tier);
+    }
+  });
+
+  // Part 8: report player modal
+  let _reportTargetId   = null;
+  let _reportTargetName = null;
+  document.getElementById('reportConfirmBtn')?.addEventListener('click', () => {
+    if (_reportTargetId) {
+      reportPlayer(_reportTargetId, _reportTargetName || 'Player');
+      _showOreBadge('🚩 Report sent', '#ff8888');
+    }
+    document.getElementById('reportModal')?.classList.add('hidden');
+    _reportTargetId = _reportTargetName = null;
+  });
+  document.getElementById('reportCancelBtn')?.addEventListener('click', () => {
+    document.getElementById('reportModal')?.classList.add('hidden');
+    _reportTargetId = _reportTargetName = null;
+  });
+
+  // Expose report trigger for renderer overlay click
+  window._triggerReportModal = (id, name) => {
+    _reportTargetId   = id;
+    _reportTargetName = name;
+    const nameEl = document.getElementById('reportTargetName');
+    if (nameEl) nameEl.textContent = name;
+    document.getElementById('reportModal')?.classList.remove('hidden');
+  };
+
 
 function _updateShopProximity(px, pz) {
   const nearest = getNearestShop(px, pz);
