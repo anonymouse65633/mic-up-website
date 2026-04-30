@@ -1,21 +1,42 @@
 // ============================================================
-//  WalkWorld 3D — mining.js  (PART 3 REWRITE)
+//  WalkWorld 3D — mining.js  (PART 4 FINAL)
 //
-//  Ore vein system:
-//  • generateOreVeins() pre-generates vein cells at world init
-//  • Veins spread to up to 3 adjacent cells (55% chance each)
-//  • Each vein cell has a size property (1–3) for visual variation
-//  • Depth bands enforced — ores can't spawn outside their range
-//  • Motherlode detection: 4+ cells = 1.5× bonus, 6+ cells = 2× + chat
-//  • onDig respects vein data for guaranteed ore in vein cells
+//  NEW in Part 4:
+//  ─────────────
+//  • Particle pool     — 60 pre-allocated debris meshes, reused on every dig
+//  • Camera shake      — triggerShake / tickCameraShake with exponential decay
+//  • Punch resistance  — layers need 1–20 hits before breaking through
+//                        → onDig returns { partialHit, punchProgress } mid-sequence
+//  • Rarity geometry   — shape-per-rarity tier:
+//       common     : ConeGeometry cluster + flat TorusGeometry ring
+//       uncommon   : OctahedronGeometry, slow rotation, PointLight 0.6
+//       rare       : DodecahedronGeometry + 2 orbiting cone satellites + pulse ring
+//       epic       : IcosahedronGeometry + 3-axis spin + dual PointLights + 3 orbiting spheres
+//       legendary  : TorusKnotGeometry, float, intense PointLight 1.8, haze sphere
+//       mythic     : TorusKnotGeometry (denser), fast float, PointLight 2.5, dual hazes
+//  • tickOreCrystals   — animation-budget system (only 5 nearest animated per frame)
+//       LOD: >15m skip rotate, >25m disable PointLights, >40m use proxy sphere
+//
+//  Carries forward from Part 3:
+//  ────────────────────────────
+//  • Gemini ore deposit generation
+//  • Deterministic vein system (generateOreVeins)
+//  • Motherlode detection (4+ = 1.5×, 6+ = 2× + server chat)
+//  • Strata rings on shaft walls
+//  • onDig fully wired to vein/deposit/size bonus pipeline
 // ============================================================
 
 import { LAYERS, ORES, ORE_TABLE, getMaterialAtDepth, rollOre } from './layers.js';
 export { LAYERS, ORES, getMaterialAtDepth, rollOre };
 
-import { scene, digSphere, getShaftAt, MINE_CELL, DIG_SPHERE_R, DIG_REACH, getBaseHeightAt } from './world.js';
+import {
+  scene, digSphere, getShaftAt,
+  MINE_CELL, DIG_SPHERE_R, DIG_REACH, getBaseHeightAt,
+} from './world.js';
 
-// ── Gemini ore deposit generation ───────────────────────────
+// ============================================================
+//  GEMINI ORE DEPOSIT GENERATION
+// ============================================================
 const GEMINI_API_KEY  = 'AIzaSyCMQqhCFpF5f1_6Fz_MJVHHFj9eYSZQVww';
 const GEMINI_ENDPOINT =
   `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
@@ -77,37 +98,17 @@ export function getOreDeposits() { return _deposits; }
 function _isDeposit(cx, cz) { return _depositSet.has(`${cx},${cz}`); }
 
 // ============================================================
-//  VEIN SYSTEM
-//
-//  Veins are pre-generated at world init. Each vein:
-//  • Belongs to a specific geological layer
-//  • Contains 1–6 cells that are adjacent or nearly adjacent
-//  • Each cell has a size (1–3) affecting visuals + bonus coins
-//  • Tracking mined cells enables the Motherlode detection
+//  VEIN SYSTEM  (Part 3 — unchanged)
 // ============================================================
-
-// _cellVein maps "cx,cz" -> [{ oreId, veinId, layerName, size }, ...]
-// A cell can technically be in veins from multiple layers (one per layer).
 const _cellVein  = new Map();
-
-// _veinMeta maps veinId -> { oreId, layerName, totalCells, minedCells: Set }
 const _veinMeta  = new Map();
-
 let _veinCounter = 0;
 
-// How many vein seed points to scatter per layer
 const VEIN_SEEDS_PER_LAYER = {
-  'Grass/Dirt':  4,
-  'Clay':        7,
-  'Stone':       14,
-  'Sandstone':   11,
-  'Dark Stone':   9,
-  'Obsidian':     7,
-  'Dense Ore':    5,
-  'The Void':     3,
+  'Grass/Dirt':  4, 'Clay': 7, 'Stone': 14, 'Sandstone': 11,
+  'Dark Stone': 9,  'Obsidian': 7, 'Dense Ore': 5, 'The Void': 3,
 };
 
-// Simple seeded PRNG so veins are deterministic across clients
 function _makePrng(seed) {
   let s = (seed >>> 0) || 1;
   return () => {
@@ -116,50 +117,31 @@ function _makePrng(seed) {
   };
 }
 
-/**
- * generateOreVeins(worldSeed)
- *
- * Call once at world init (after generateOreDeposits).
- * Seeds all vein data so every client in the same session sees
- * the same ores at the same cell coords.
- */
 export function generateOreVeins(worldSeed = 42) {
-  _cellVein.clear();
-  _veinMeta.clear();
-  _veinCounter = 0;
-
-  const rng   = _makePrng(worldSeed);
-  const HALF  = 30; // grid spans -30 to +30 cells
+  _cellVein.clear(); _veinMeta.clear(); _veinCounter = 0;
+  const rng = _makePrng(worldSeed);
+  const HALF = 30;
 
   for (const layer of LAYERS) {
-    const seeds   = VEIN_SEEDS_PER_LAYER[layer.name] || 6;
-    const table   = ORE_TABLE[layer.name];
+    const seeds = VEIN_SEEDS_PER_LAYER[layer.name] || 6;
+    const table = ORE_TABLE[layer.name];
     if (!table || table.length === 0) continue;
 
     for (let s = 0; s < seeds; s++) {
-      // Random seed cell inside the world grid
       const cx0 = Math.floor(rng() * (HALF * 2 + 1)) - HALF;
       const cz0 = Math.floor(rng() * (HALF * 2 + 1)) - HALF;
-
-      // Pick an ore for this vein by rolling against the layer table
       const ore = _rollFromTable(table, rng());
       if (!ore) continue;
-
-      // Depth band check against the layer's midpoint
       const midDepth = (layer.minDepth + layer.maxDepth) / 2;
-      const band     = ore.depthBand;
+      const band = ore.depthBand;
       if (midDepth < band[0] || midDepth > band[1]) continue;
 
-      // Create the vein
       const veinId = ++_veinCounter;
       const cells  = [];
-
       _addCell(cx0, cz0, ore.id, veinId, layer.name, rng, cells);
 
-      // Shuffle 4 cardinal neighbours and propagate (55% each, up to 3)
       const dirs = [
-        [cx0 + 1, cz0], [cx0 - 1, cz0],
-        [cx0,     cz0 + 1], [cx0, cz0 - 1],
+        [cx0+1,cz0],[cx0-1,cz0],[cx0,cz0+1],[cx0,cz0-1],
       ].sort(() => rng() - 0.5);
 
       let propagated = 0;
@@ -168,16 +150,10 @@ export function generateOreVeins(worldSeed = 42) {
         if (rng() < 0.55) {
           _addCell(nx, nz, ore.id, veinId, layer.name, rng, cells);
           propagated++;
-
-          // Second-level spread (30% chance from each propagated cell)
           if (rng() < 0.30) {
-            const dirs2 = [
-              [nx + 1, nz], [nx - 1, nz],
-              [nx,     nz + 1], [nx, nz - 1],
-            ].sort(() => rng() - 0.5);
+            const dirs2 = [[nx+1,nz],[nx-1,nz],[nx,nz+1],[nx,nz-1]].sort(() => rng() - 0.5);
             const [nx2, nz2] = dirs2[0];
             const k2 = `${nx2},${nz2}`;
-            // Only extend if the cell has no vein entry for this layer yet
             const existing = _cellVein.get(k2) || [];
             if (!existing.some(v => v.layerName === layer.name)) {
               _addCell(nx2, nz2, ore.id, veinId, layer.name, rng, cells);
@@ -185,25 +161,17 @@ export function generateOreVeins(worldSeed = 42) {
           }
         }
       }
-
-      _veinMeta.set(veinId, {
-        oreId:      ore.id,
-        layerName:  layer.name,
-        totalCells: cells.length,
-        minedCells: new Set(),
-      });
+      _veinMeta.set(veinId, { oreId: ore.id, layerName: layer.name, totalCells: cells.length, minedCells: new Set() });
     }
   }
-
   console.log(`[Mining] Generated ${_veinCounter} ore veins across ${_cellVein.size} unique cells.`);
 }
 
 function _addCell(cx, cz, oreId, veinId, layerName, rng, cells) {
-  const key      = `${cx},${cz}`;
+  const key = `${cx},${cz}`;
   const existing = _cellVein.get(key) || [];
-  // One vein entry per layer per cell
   if (existing.some(v => v.layerName === layerName)) return;
-  const size = Math.floor(rng() * 3) + 1;   // 1–3
+  const size = Math.floor(rng() * 3) + 1;
   existing.push({ oreId, veinId, layerName, size });
   _cellVein.set(key, existing);
   cells.push(key);
@@ -216,64 +184,154 @@ function _rollFromTable(table, r) {
   return null;
 }
 
-/**
- * getVeinCell(cx, cz, layerName)
- * Returns the vein entry for this cell at the current layer, or null.
- */
 export function getVeinCell(cx, cz, layerName) {
   const entries = _cellVein.get(`${cx},${cz}`);
   if (!entries) return null;
   return entries.find(v => v.layerName === layerName) || null;
 }
 
-/**
- * recordVeinMined(veinId, cellKey)
- * Called when a vein cell is dug. Returns motherlode info if applicable.
- * Returns: { isMotherlode, isGrandMotherlode, totalCells, minedCount, oreId }
- */
 export function recordVeinMined(veinId, cx, cz) {
   const meta = _veinMeta.get(veinId);
   if (!meta) return null;
-
-  const cellKey = `${cx},${cz}`;
-  meta.minedCells.add(cellKey);
-
+  meta.minedCells.add(`${cx},${cz}`);
   const minedCount = meta.minedCells.size;
-  const totalCells = meta.totalCells;
-
   return {
-    isMotherlode:      minedCount >= 4,
-    isGrandMotherlode: minedCount >= 6,
-    minedCount,
-    totalCells,
-    oreId: meta.oreId,
+    isMotherlode: minedCount >= 4, isGrandMotherlode: minedCount >= 6,
+    minedCount, totalCells: meta.totalCells, oreId: meta.oreId,
   };
 }
 
-// ── State ────────────────────────────────────────────────────
+// ============================================================
+//  STATE
+// ============================================================
 let _money = 0;
-const _sphereMeshes = new Map(); // key -> { group, oreCrystals }
+export function getMoney()       { return _money; }
+export function addMoney(amount) { _money = Math.max(0, _money + amount); }
+export function getDepthAt(x, z) { const s = getShaftAt(x, z); return s ? s.depth : 0; }
 
-export function getMoney()        { return _money; }
-export function addMoney(amount)  { _money = Math.max(0, _money + amount); }
+// _sphereMeshes: key → { group, cx, cz, baseY, rarity, crystals[], satellites[],
+//                         pointLights[], pulseRings[], animPhase, floatAmp,
+//                         proxyMesh|null, isLowLOD }
+const _sphereMeshes = new Map();
 
-export function getDepthAt(x, z) {
-  const shaft = getShaftAt(x, z);
-  return shaft ? shaft.depth : 0;
+// Punch resistance: tracks hit count per dig-cell-key
+const _punchHits = new Map();
+
+// ============================================================
+//  PARTICLE POOL  (60 pre-allocated debris meshes)
+// ============================================================
+const POOL_SIZE        = 60;
+const _particlePool    = [];
+const _activeParticles = [];
+
+export function initMining() {
+  if (typeof THREE === 'undefined') return;
+  const geo = new THREE.OctahedronGeometry(0.055, 0);
+  const mat = new THREE.MeshLambertMaterial({ color: 0x888888 });
+  for (let i = 0; i < POOL_SIZE; i++) {
+    const mesh = new THREE.Mesh(geo, mat.clone());
+    mesh.visible = false;
+    scene.add(mesh);
+    _particlePool.push(mesh);
+  }
+}
+
+function _acquireParticle() {
+  return _particlePool.find(m => !m.visible) ?? null;
+}
+
+function _spawnParticles(x, y, z, color, count = 8) {
+  const col = new THREE.Color(color);
+  for (let i = 0; i < count; i++) {
+    const mesh = _acquireParticle();
+    if (!mesh) break;
+    mesh.material.color.copy(col);
+    mesh.position.set(x, y, z);
+    mesh.visible = true;
+    mesh.scale.setScalar(0.8 + Math.random() * 0.8);
+    const speed = 2.5 + Math.random() * 3.5;
+    const theta = Math.random() * Math.PI * 2;
+    const phi   = Math.PI * (0.25 + Math.random() * 0.5);
+    _activeParticles.push({
+      mesh,
+      vel: {
+        x: Math.sin(phi) * Math.cos(theta) * speed,
+        y: Math.cos(phi) * speed + 1.5,
+        z: Math.sin(phi) * Math.sin(theta) * speed,
+      },
+      life: 0,
+      maxLife: 0.55 + Math.random() * 0.35,
+    });
+  }
+}
+
+export function tickParticles(dt) {
+  for (let i = _activeParticles.length - 1; i >= 0; i--) {
+    const p = _activeParticles[i];
+    p.life += dt;
+    if (p.life >= p.maxLife) {
+      p.mesh.visible = false;
+      _activeParticles.splice(i, 1);
+      continue;
+    }
+    const t = p.life / p.maxLife;
+    p.vel.y -= 9.8 * dt;
+    p.mesh.position.x += p.vel.x * dt;
+    p.mesh.position.y += p.vel.y * dt;
+    p.mesh.position.z += p.vel.z * dt;
+    p.mesh.material.opacity = 1 - t * t;
+    p.mesh.material.transparent = true;
+    p.mesh.scale.setScalar((1 - t) * (0.8 + Math.random() * 0.05));
+    p.mesh.rotation.x += dt * 6;
+    p.mesh.rotation.z += dt * 4;
+  }
 }
 
 // ============================================================
-//  MAIN DIG API — always digs DOWN at player position
-//
-//  Priority order for ore at a cell:
-//  1. Vein cell for current layer  (guaranteed ore, size bonus)
-//  2. Random rollOre() scatter     (depth-band enforced)
-//  3. Deposit multiplier on top of either
+//  CAMERA SHAKE
+// ============================================================
+let _shakeAmount = 0;
+const SHAKE_DECAY = 9.0;
+
+export function triggerShake(amount) {
+  _shakeAmount = Math.max(_shakeAmount, amount);
+}
+
+export function tickCameraShake(camera, dt) {
+  if (!camera || _shakeAmount <= 0.001) { _shakeAmount = 0; return; }
+  camera.position.x += (Math.random() - 0.5) * _shakeAmount * 0.12;
+  camera.position.y += (Math.random() - 0.5) * _shakeAmount * 0.08;
+  _shakeAmount *= Math.exp(-SHAKE_DECAY * dt);
+}
+
+// ============================================================
+//  MAIN DIG API — punch resistance + full ore pipeline
 // ============================================================
 export function onDig(px, py, pz, yaw, pitch, eyeHeight) {
   const surfaceY      = getBaseHeightAt(px, pz);
   const shaft         = getShaftAt(px, pz);
   const currentFloorY = shaft ? shaft.floorY : surfaceY;
+
+  // Preview depth to determine the layer the player is about to punch
+  const previewDepth = surfaceY - currentFloorY + DIG_SPHERE_R * 0.9;
+  const layer        = getMaterialAtDepth(Math.max(0, previewDepth));
+
+  // ── Punch resistance ────────────────────────────────────
+  const punchKey   = `${Math.round(px / MINE_CELL)},${Math.round(pz / MINE_CELL)}`;
+  const maxPunches = Math.max(1, layer.punches ?? 1);
+  let currentHits  = (_punchHits.get(punchKey) ?? 0) + 1;
+  _punchHits.set(punchKey, currentHits);
+
+  const punchProgress = Math.min(currentHits / maxPunches, 1);
+  const shakeAmt = (layer.shakeAmt ?? 0.05) * (currentHits < maxPunches ? 0.5 : 1.0);
+  triggerShake(shakeAmt);
+
+  if (currentHits < maxPunches) {
+    return { partialHit: true, layer, hits: currentHits, maxHits: maxPunches, punchProgress, shakeAmt };
+  }
+
+  // ── Full break ──────────────────────────────────────────
+  _punchHits.delete(punchKey);
 
   const digX = px;
   const digY = currentFloorY - (DIG_SPHERE_R * 0.45);
@@ -282,67 +340,49 @@ export function onDig(px, py, pz, yaw, pitch, eyeHeight) {
   const result = digSphere(digX, digY, digZ, DIG_SPHERE_R);
   if (!result) return null;
 
-  const { key, cellX, cellZ, worldX, worldZ, floorY, depth, surfaceY: sY } = result;
-  const layer      = getMaterialAtDepth(depth);
-  const depositHit = layer.name === 'Dense Ore' && _isDeposit(cellX, cellZ);
+  const { key, cellX, cellZ, depth, surfaceY: sY, floorY } = result;
+  const finalLayer = getMaterialAtDepth(depth);
+  const depositHit = finalLayer.name === 'Dense Ore' && _isDeposit(cellX, cellZ);
 
-  // ── Ore resolution ──────────────────────────────────────
-  let ore     = null;
-  let oreSize = 1;
-  let veinId  = null;
-
-  const veinEntry = getVeinCell(cellX, cellZ, layer.name);
-
+  // Ore resolution: vein first, then scatter
+  let ore = null, oreSize = 1, veinId = null;
+  const veinEntry = getVeinCell(cellX, cellZ, finalLayer.name);
   if (veinEntry) {
-    // Guaranteed ore from vein (depth band already checked at generation)
-    ore     = ORES[veinEntry.oreId];
-    oreSize = veinEntry.size;
-    veinId  = veinEntry.veinId;
+    ore = ORES[veinEntry.oreId]; oreSize = veinEntry.size; veinId = veinEntry.veinId;
   } else {
-    // Scattered random ore (passes through depth band check in rollOre)
-    ore = rollOre(layer.name, depth);
+    ore = rollOre(finalLayer.name, depth);
   }
 
-  // ── Coin calculation ─────────────────────────────────────
-  const layerBase     = layer.value;
-  const oreBase       = ore ? ore.value : 0;
-
-  // Size multiplier: size 2 = +50% ore coins, size 3 = +100% ore coins
-  const sizeMult      = oreSize === 3 ? 2.0 : oreSize === 2 ? 1.5 : 1.0;
-  const oreCoinValue  = oreBase * sizeMult;
-
-  let earned = layerBase + oreCoinValue;
+  // Coins
+  const oreCoinValue = (ore ? ore.value : 0) * (oreSize === 3 ? 2.0 : oreSize === 2 ? 1.5 : 1.0);
+  let earned = finalLayer.value + oreCoinValue;
   if (depositHit) earned *= 3;
 
-  // ── Motherlode bonus ─────────────────────────────────────
+  // Motherlode
   let motherlodeInfo = null;
   if (veinId !== null) {
     motherlodeInfo = recordVeinMined(veinId, cellX, cellZ);
-    if (motherlodeInfo?.isGrandMotherlode) {
-      // 6+ cells mined: 2× the last ore's value (already applied to earned above)
-      earned += oreCoinValue; // doubles the ore portion
-    } else if (motherlodeInfo?.isMotherlode) {
-      // 4+ cells mined: 1.5× the last ore's value
-      earned += oreCoinValue * 0.5;
-    }
+    if (motherlodeInfo?.isGrandMotherlode) earned += oreCoinValue;
+    else if (motherlodeInfo?.isMotherlode)  earned += oreCoinValue * 0.5;
   }
-
   _money += earned;
 
-  _updateSphereVisuals(key, digX, digY, digZ, DIG_SPHERE_R, depth, sY, ore, layer, oreSize);
+  // Particles
+  _spawnParticles(digX, (floorY ?? digY - DIG_SPHERE_R) + 0.15, digZ, ore ? ore.color : finalLayer.color, ore ? 12 : 7);
+
+  // Layer change detection
+  let newLayer = null;
+  if (shaft) {
+    const prevLayer = getMaterialAtDepth(shaft.depth);
+    if (prevLayer.name !== finalLayer.name) newLayer = finalLayer;
+  }
+
+  _updateSphereVisuals(key, digX, digY, digZ, DIG_SPHERE_R, depth, sY, ore, finalLayer, oreSize);
 
   return {
-    layer,
-    ore,
-    oreSize,
-    depth,
-    earned,
-    totalMoney: _money,
-    isDeposit:  depositHit,
-    veinEntry,
-    motherlode: motherlodeInfo,
-    cellX,
-    cellZ,
+    layer: finalLayer, ore, oreSize, depth, earned, totalMoney: _money,
+    isDeposit: depositHit, veinEntry, motherlode: motherlodeInfo,
+    cellX, cellZ, punchProgress: 1, shakeAmt: finalLayer.shakeAmt ?? 0.05, newLayer,
   };
 }
 
@@ -350,252 +390,322 @@ export function onDig(px, py, pz, yaw, pitch, eyeHeight) {
 //  RESET
 // ============================================================
 export function resetMining() {
-  for (const { group } of _sphereMeshes.values()) {
-    scene.remove(group);
-    group.traverse(child => {
-      if (child.geometry) child.geometry.dispose();
-      if (child.material) child.material.dispose();
+  for (const data of _sphereMeshes.values()) {
+    scene.remove(data.group);
+    data.group.traverse(c => {
+      if (c.geometry) c.geometry.dispose();
+      if (c.material) c.material.dispose();
     });
+    if (data.proxyMesh) { scene.remove(data.proxyMesh); data.proxyMesh.geometry?.dispose(); data.proxyMesh.material?.dispose(); }
   }
   _sphereMeshes.clear();
+  _punchHits.clear();
   _money = 0;
+  _activeParticles.forEach(p => { p.mesh.visible = false; });
+  _activeParticles.length = 0;
 }
 
 // ============================================================
-//  SPHERE VISUALS — ore crystal clusters in holes
+//  SPHERE VISUALS
 // ============================================================
 function _updateSphereVisuals(key, cx, cy, cz, radius, depth, surfaceY, ore, layer, oreSize = 1) {
   const old = _sphereMeshes.get(key);
   if (old) {
     scene.remove(old.group);
-    old.group.traverse(child => {
-      if (child.geometry) child.geometry.dispose();
-      if (child.material) child.material.dispose();
-    });
+    old.group.traverse(c => { if (c.geometry) c.geometry.dispose(); if (c.material) c.material.dispose(); });
+    if (old.proxyMesh) { scene.remove(old.proxyMesh); old.proxyMesh.geometry?.dispose(); old.proxyMesh.material?.dispose(); }
   }
 
   const group  = new THREE.Group();
   const floorY = cy - radius;
 
-  // Strata layer rings — visible at the walls of the hole
+  // Strata rings
   const visibleLayers = LAYERS.filter(l => {
-    const bandTop    = surfaceY - l.minDepth;
-    const bandBottom = surfaceY - Math.min(depth, l.maxDepth);
-    return bandTop > bandBottom;
+    const bt = surfaceY - l.minDepth;
+    const bb = surfaceY - Math.min(depth, l.maxDepth);
+    return bt > bb;
   });
-
   for (const vl of visibleLayers) {
-    const bandTop    = surfaceY - vl.minDepth;
-    const bandBottom = surfaceY - Math.min(depth, vl.maxDepth);
-    if (bandTop - bandBottom < 0.1) continue;
-
-    const midY        = (bandTop + bandBottom) * 0.5;
-    const relY        = midY - cy;
-    const clampedRelY = Math.max(-radius * 0.95, Math.min(radius * 0.95, relY));
-    const ringR       = Math.sqrt(Math.max(0, radius * radius - clampedRelY * clampedRelY));
-
+    const bt = surfaceY - vl.minDepth;
+    const bb = surfaceY - Math.min(depth, vl.maxDepth);
+    if (bt - bb < 0.1) continue;
+    const midY = (bt + bb) * 0.5;
+    const relY = Math.max(-radius * 0.95, Math.min(radius * 0.95, midY - cy));
+    const ringR = Math.sqrt(Math.max(0, radius * radius - relY * relY));
     if (ringR < 0.3) continue;
-
-    const torusGeo = new THREE.TorusGeometry(ringR, 0.12, 6, 24, Math.PI * 2);
-    const torusMat = new THREE.MeshLambertMaterial({
-      color:       vl.color,
-      transparent: true,
-      opacity:     0.85,
-    });
-    const torus = new THREE.Mesh(torusGeo, torusMat);
-    torus.rotation.x = Math.PI / 2;
-    torus.position.set(cx, midY, cz);
-    group.add(torus);
+    const t = new THREE.Mesh(
+      new THREE.TorusGeometry(ringR, 0.12, 6, 24, Math.PI * 2),
+      new THREE.MeshLambertMaterial({ color: vl.color, transparent: true, opacity: 0.85 }),
+    );
+    t.rotation.x = Math.PI / 2;
+    t.position.set(cx, midY, cz);
+    group.add(t);
   }
 
-  // Ore crystal cluster at the floor (size scales the cluster)
-  if (ore) {
-    _buildOreCrystalCluster(group, cx, floorY + 0.05, cz, ore, depth, oreSize);
-  }
+  // Ore crystals
+  let crystalData = null;
+  if (ore) crystalData = _buildOreCrystalCluster(group, cx, floorY + 0.05, cz, ore, depth, oreSize);
 
   scene.add(group);
-  _sphereMeshes.set(key, { group });
+  _sphereMeshes.set(key, {
+    group, cx, cz,
+    baseY:       floorY + 0.05,
+    rarity:      ore?.rarity ?? 'common',
+    crystals:    crystalData?.crystals    ?? [],
+    satellites:  crystalData?.satellites  ?? [],
+    pointLights: crystalData?.pointLights ?? [],
+    pulseRings:  crystalData?.pulseRings  ?? [],
+    animPhase:   Math.random() * Math.PI * 2,
+    floatAmp:    crystalData?.floatAmp    ?? 0,
+    proxyMesh:   null,
+    isLowLOD:    false,
+  });
 }
 
+// ============================================================
+//  RARITY-BASED GEOMETRY
+// ============================================================
 function _buildOreCrystalCluster(group, cx, baseY, cz, ore, depth, oreSize = 1) {
-  const rarity   = ore.rarity;
-  const oreColor = ore.color;
-  const emissive = new THREE.Color(oreColor);
+  const rarity     = ore.rarity;
+  const oreColor   = ore.color;
+  const emissive   = new THREE.Color(oreColor);
+  const sizeFactor = 0.7 + oreSize * 0.2;
 
-  // oreSize (1–3) scales count and base size
-  const countBase = { legendary: 9, mythic: 11, epic: 7, rare: 5, uncommon: 4, common: 3 };
-  const count  = Math.round((countBase[rarity] ?? 3) * (0.7 + oreSize * 0.3));
-
-  const sizeBase = { legendary: 0.55, mythic: 0.65, epic: 0.45, rare: 0.38, uncommon: 0.30, common: 0.22 };
-  const baseSize = (sizeBase[rarity] ?? 0.22) * (0.7 + oreSize * 0.2);
-
-  const mat = new THREE.MeshLambertMaterial({
-    color:              oreColor,
-    emissive:           emissive,
-    emissiveIntensity:  rarity === 'mythic'    ? 1.0
-                      : rarity === 'legendary' ? 0.8
-                      : rarity === 'epic'      ? 0.65
-                      : rarity === 'rare'      ? 0.5
-                      : rarity === 'uncommon'  ? 0.35
-                      :                          0.2,
-  });
+  const crystals = [], satellites = [], pointLights = [], pulseRings = [];
+  let floatAmp = 0;
 
   let rngSeed = (Math.round(cx * 13 + cz * 7 + 1000)) >>> 0;
-  const rng = () => {
-    rngSeed = Math.imul(rngSeed, 1664525) + 1013904223 >>> 0;
-    return rngSeed / 0x100000000;
-  };
+  const rng = () => { rngSeed = Math.imul(rngSeed, 1664525) + 1013904223 >>> 0; return rngSeed / 0x100000000; };
 
-  for (let i = 0; i < count; i++) {
-    const angle  = (i / count) * Math.PI * 2 + rng() * 0.8;
-    const spread = i === 0 ? 0 : (0.1 + rng() * 0.55);
-    const height = baseSize * (0.7 + rng() * 0.9);
-    const width  = baseSize * (0.12 + rng() * 0.14);
-    const tilt   = rng() * 0.45;
+  const mkMat = (intensity, opacity = 1) => new THREE.MeshLambertMaterial({
+    color: oreColor, emissive, emissiveIntensity: intensity,
+    transparent: opacity < 1, opacity,
+  });
 
-    const geo  = new THREE.ConeGeometry(width, height, 5 + Math.floor(rng() * 3), 1);
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(cx + Math.cos(angle) * spread, baseY + height * 0.5, cz + Math.sin(angle) * spread);
-    mesh.rotation.z =  Math.cos(angle) * tilt;
-    mesh.rotation.x = -Math.sin(angle) * tilt;
-    group.add(mesh);
-
-    if (rarity !== 'common') {
-      const nubGeo = new THREE.ConeGeometry(width * 0.7, height * 0.25, 5, 1);
-      const nub    = new THREE.Mesh(nubGeo, mat);
-      nub.position.set(cx + Math.cos(angle) * spread, baseY + height * 0.08, cz + Math.sin(angle) * spread);
-      nub.rotation.z = mesh.rotation.z;
-      nub.rotation.x = mesh.rotation.x;
-      nub.rotation.y = Math.PI;
-      group.add(nub);
+  if (rarity === 'common') {
+    const mat = mkMat(0.15);
+    const count = Math.round(3 * sizeFactor);
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2 + rng() * 0.8;
+      const spread = i === 0 ? 0 : 0.12 + rng() * 0.45;
+      const h = (0.18 + rng() * 0.25) * sizeFactor;
+      const w = (0.06 + rng() * 0.07) * sizeFactor;
+      const mesh = new THREE.Mesh(new THREE.ConeGeometry(w, h, 5, 1), mat);
+      mesh.position.set(cx + Math.cos(angle) * spread, baseY + h * 0.5, cz + Math.sin(angle) * spread);
+      mesh.rotation.z =  Math.cos(angle) * 0.35 * rng();
+      mesh.rotation.x = -Math.sin(angle) * 0.35 * rng();
+      group.add(mesh); crystals.push(mesh);
     }
-  }
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.18 * sizeFactor, 0.025, 4, 18), mkMat(0.12, 0.75));
+    ring.rotation.x = Math.PI / 2;
+    ring.position.set(cx, baseY + 0.01, cz);
+    group.add(ring); pulseRings.push(ring);
 
-  // Point lights for rarer tiers — scale intensity with oreSize
-  const lightScale = 0.7 + oreSize * 0.3;
-  if (rarity === 'mythic') {
-    const light = new THREE.PointLight(oreColor, 2.5 * lightScale, 12);
-    light.position.set(cx, baseY + baseSize, cz);
-    group.add(light);
-  } else if (rarity === 'legendary') {
-    const light = new THREE.PointLight(oreColor, 1.8 * lightScale, 8);
-    light.position.set(cx, baseY + baseSize, cz);
-    group.add(light);
+  } else if (rarity === 'uncommon') {
+    const mat = mkMat(0.35);
+    const count = Math.round(4 * sizeFactor);
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2 + rng() * 0.6;
+      const spread = i === 0 ? 0 : 0.08 + rng() * 0.38;
+      const sz = (0.12 + rng() * 0.16) * sizeFactor;
+      const mesh = new THREE.Mesh(new THREE.OctahedronGeometry(sz, 0), mat);
+      mesh.position.set(cx + Math.cos(angle) * spread, baseY + sz, cz + Math.sin(angle) * spread);
+      mesh.rotation.y = rng() * Math.PI;
+      group.add(mesh); crystals.push(mesh);
+    }
+    const light = new THREE.PointLight(oreColor, 0.6 * sizeFactor, 5);
+    light.position.set(cx, baseY + 0.4, cz);
+    group.add(light); pointLights.push(light);
+
+  } else if (rarity === 'rare') {
+    const mat = mkMat(0.55);
+    const sz  = (0.22 + rng() * 0.12) * sizeFactor;
+    const main = new THREE.Mesh(new THREE.DodecahedronGeometry(sz, 0), mat);
+    main.position.set(cx, baseY + sz + 0.06, cz);
+    main.rotation.y = rng() * Math.PI * 2;
+    group.add(main); crystals.push(main);
+    for (let i = 0; i < 2; i++) {
+      const a = (i / 2) * Math.PI * 2 + rng() * 0.5;
+      const ssz = sz * 0.55;
+      const sm = new THREE.Mesh(new THREE.DodecahedronGeometry(ssz, 0), mat);
+      sm.position.set(cx + Math.cos(a) * 0.22 * sizeFactor, baseY + ssz + 0.04, cz + Math.sin(a) * 0.22 * sizeFactor);
+      sm.rotation.y = rng() * Math.PI * 2;
+      group.add(sm); crystals.push(sm);
+    }
+    for (let i = 0; i < 2; i++) {
+      const satMesh = new THREE.Mesh(new THREE.ConeGeometry(0.045 * sizeFactor, 0.16 * sizeFactor, 5, 1), mkMat(0.6));
+      group.add(satMesh);
+      satellites.push({ mesh: satMesh, angle: (i / 2) * Math.PI * 2, dist: 0.30 * sizeFactor, speed: 1.1 + rng() * 0.4, baseY: baseY + sz + 0.06, tiltZ: 0.3 + rng() * 0.3 });
+    }
+    const pulseMesh = new THREE.Mesh(new THREE.TorusGeometry(sz * 1.8, 0.03, 6, 24), mkMat(0.5, 0.7));
+    pulseMesh.rotation.x = Math.PI / 2;
+    pulseMesh.position.set(cx, baseY + sz + 0.06, cz);
+    group.add(pulseMesh); pulseRings.push(pulseMesh);
+    const light = new THREE.PointLight(oreColor, 1.0 * sizeFactor, 7);
+    light.position.set(cx, baseY + sz + 0.2, cz);
+    group.add(light); pointLights.push(light);
+
   } else if (rarity === 'epic') {
-    const light = new THREE.PointLight(oreColor, 1.0 * lightScale, 6);
-    light.position.set(cx, baseY + baseSize, cz);
-    group.add(light);
-  }
-}
-
-
-// ── Gemini ore deposit generation ───────────────────────────
-const GEMINI_API_KEY  = 'AIzaSyCMQqhCFpF5f1_6Fz_MJVHHFj9eYSZQVww';
-const GEMINI_ENDPOINT =
-  `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
-
-const FALLBACK_DEPOSITS = [
-  {cx:-8,cz:-5},{cx:-7,cz:-5},{cx:12,cz:3},{cx:0,cz:14},{cx:1,cz:14},
-  {cx:-15,cz:10},{cx:6,cz:-18},{cx:7,cz:-18},{cx:-3,cz:7},{cx:19,cz:-9},
-  {cx:-20,cz:-14},{cx:10,cz:20},{cx:-5,cz:-20},{cx:15,cz:12},{cx:-12,cz:2},
-  {cx:2,cz:-8},{cx:-9,cz:17},{cx:18,cz:-2},{cx:-1,cz:-13},{cx:5,cz:5},
-];
-
-let _deposits   = [];
-let _depositSet = new Set();
-
-export async function generateOreDeposits() {
-  _deposits = [];
-  _depositSet.clear();
-
-  const prompt = `You are generating a random ore deposit map for a 3D mining game.
-Generate exactly 20 unique special ore deposit locations as a JSON array.
-Each object has integer keys "cx" and "cz" in the range -25 to 25.
-Rules:
-- No two deposits share the same (cx, cz).
-- Include 3-4 clusters of 2-3 adjacent cells (adjacent = differ by 1 in one axis).
-- Other deposits spread out at least 4 units apart.
-- Vary placement across all four quadrants.
-Return ONLY a valid JSON array like: [{"cx":3,"cz":-7},{"cx":4,"cz":-7}]
-No markdown, no explanation.`;
-
-  try {
-    const res = await fetch(GEMINI_ENDPOINT, {
-      method  : 'POST',
-      headers : { 'Content-Type': 'application/json' },
-      body    : JSON.stringify({
-        contents        : [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 1.1, maxOutputTokens: 512 },
-      }),
-    });
-    if (!res.ok) throw new Error(`Gemini HTTP ${res.status}`);
-    const data  = await res.json();
-    const raw   = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-    const clean = raw.replace(/```[\w]*\n?/g, '').trim();
-    const list  = JSON.parse(clean);
-    if (Array.isArray(list) && list.length > 0) {
-      _deposits = list.map(d => ({ cx: Number(d.cx), cz: Number(d.cz) }));
-      _deposits.forEach(d => _depositSet.add(`${d.cx},${d.cz}`));
-      console.log(`[Mining] Gemini generated ${_deposits.length} ore deposits.`);
-      return;
+    const mat = mkMat(0.70);
+    const sz  = (0.28 + rng() * 0.10) * sizeFactor;
+    const main = new THREE.Mesh(new THREE.IcosahedronGeometry(sz, 0), mat);
+    main.position.set(cx, baseY + sz + 0.08, cz);
+    group.add(main); crystals.push(main);
+    for (let i = 0; i < 3; i++) {
+      const orbMesh = new THREE.Mesh(new THREE.SphereGeometry(0.065 * sizeFactor, 6, 4), mkMat(0.75));
+      group.add(orbMesh);
+      satellites.push({ mesh: orbMesh, angle: (i / 3) * Math.PI * 2, dist: 0.42 * sizeFactor, speed: 0.85 + rng() * 0.3, baseY: baseY + sz + 0.08, tiltZ: 0 });
     }
-    throw new Error('Empty list from Gemini');
-  } catch (err) {
-    console.warn('[Mining] Gemini failed, using fallback deposits.', err);
-    _deposits = [...FALLBACK_DEPOSITS];
-    _deposits.forEach(d => _depositSet.add(`${d.cx},${d.cz}`));
+    const l1 = new THREE.PointLight(oreColor, 1.0 * sizeFactor, 8);
+    l1.position.set(cx, baseY + sz + 0.3, cz);
+    group.add(l1); pointLights.push(l1);
+    const l2 = new THREE.PointLight(oreColor, 0.5 * sizeFactor, 5);
+    l2.position.set(cx, baseY + 0.05, cz);
+    group.add(l2); pointLights.push(l2);
+    floatAmp = 0.06;
+
+  } else if (rarity === 'legendary') {
+    const mat = mkMat(0.85);
+    const sz  = (0.22 + rng() * 0.06) * sizeFactor;
+    const main = new THREE.Mesh(new THREE.TorusKnotGeometry(sz, sz * 0.32, 64, 8, 2, 3), mat);
+    main.position.set(cx, baseY + sz + 0.3, cz);
+    group.add(main); crystals.push(main);
+    const hazeMesh = new THREE.Mesh(new THREE.SphereGeometry(sz * 2.2, 8, 6), new THREE.MeshLambertMaterial({ color: oreColor, transparent: true, opacity: 0.08, depthWrite: false }));
+    hazeMesh.position.set(cx, baseY + sz + 0.3, cz);
+    group.add(hazeMesh);
+    const light = new THREE.PointLight(oreColor, 1.8 * sizeFactor, 12);
+    light.position.set(cx, baseY + sz + 0.4, cz);
+    group.add(light); pointLights.push(light);
+    floatAmp = 0.12;
+
+  } else if (rarity === 'mythic') {
+    const mat = mkMat(1.0);
+    const sz  = (0.26 + rng() * 0.06) * sizeFactor;
+    const main = new THREE.Mesh(new THREE.TorusKnotGeometry(sz, sz * 0.36, 96, 10, 3, 4), mat);
+    main.position.set(cx, baseY + sz + 0.35, cz);
+    group.add(main); crystals.push(main);
+    for (let h = 0; h < 2; h++) {
+      const hazeMesh = new THREE.Mesh(new THREE.SphereGeometry(sz * (2.0 + h * 1.2), 8, 6), new THREE.MeshLambertMaterial({ color: oreColor, transparent: true, opacity: 0.06 - h * 0.02, depthWrite: false }));
+      hazeMesh.position.set(cx, baseY + sz + 0.35, cz);
+      group.add(hazeMesh);
+    }
+    for (let i = 0; i < 3; i++) {
+      const oMesh = new THREE.Mesh(new THREE.IcosahedronGeometry(0.07 * sizeFactor, 0), mkMat(0.9));
+      group.add(oMesh);
+      satellites.push({ mesh: oMesh, angle: (i / 3) * Math.PI * 2, dist: 0.5 * sizeFactor, speed: 1.4 + rng() * 0.4, baseY: baseY + sz + 0.35, tiltZ: 0 });
+    }
+    const light = new THREE.PointLight(oreColor, 2.5 * sizeFactor, 16);
+    light.position.set(cx, baseY + sz + 0.5, cz);
+    group.add(light); pointLights.push(light);
+    floatAmp = 0.18;
+  }
+
+  return { crystals, satellites, pointLights, pulseRings, floatAmp };
+}
+
+// ============================================================
+//  TICK — LOD + ANIMATION BUDGET  (max 5 animated per frame)
+//
+//  LOD tiers:
+//    ≤ 15m  → full animation (spin, float, orbit, pulse)
+//    15–25m → skip rotation/float
+//    25–40m → also disable PointLights
+//    > 40m  → replace with tiny proxy sphere
+// ============================================================
+const MAX_ANIMATED    = 5;
+const LOD_SKIP_ROTATE = 15;
+const LOD_NO_LIGHTS   = 25;
+const LOD_PROXY       = 40;
+
+let _crystalTime = 0;
+
+export function tickOreCrystals(camera, dt) {
+  if (!camera || _sphereMeshes.size === 0) return;
+  if (typeof THREE === 'undefined') return;
+  _crystalTime += dt;
+
+  const camPos = camera.position;
+  const sorted = [..._sphereMeshes.entries()]
+    .map(([key, data]) => {
+      const dx = data.cx - camPos.x, dz = data.cz - camPos.z;
+      return { key, data, dist: Math.sqrt(dx * dx + dz * dz) };
+    })
+    .sort((a, b) => a.dist - b.dist);
+
+  let animated = 0;
+
+  for (const { key, data, dist } of sorted) {
+    const { rarity, crystals, satellites, pointLights, pulseRings, animPhase, floatAmp } = data;
+
+    // LOD > 40m: proxy sphere
+    if (dist > LOD_PROXY) {
+      if (!data.isLowLOD) {
+        data.isLowLOD = true;
+        data.group.visible = false;
+        if (!data.proxyMesh) {
+          const pm = new THREE.Mesh(
+            new THREE.SphereGeometry(0.18, 4, 3),
+            new THREE.MeshLambertMaterial({ color: crystals[0]?.material?.color ?? 0xffffff }),
+          );
+          pm.position.set(data.cx, data.baseY + 0.2, data.cz);
+          scene.add(pm);
+          data.proxyMesh = pm;
+        }
+        data.proxyMesh.visible = true;
+      }
+      continue;
+    }
+
+    // Restore from proxy
+    if (data.isLowLOD) {
+      data.isLowLOD = false;
+      data.group.visible = true;
+      if (data.proxyMesh) data.proxyMesh.visible = false;
+    }
+
+    // LOD > 25m: disable point lights
+    const lightsOn = dist <= LOD_NO_LIGHTS;
+    for (const pl of pointLights) pl.visible = lightsOn;
+
+    // LOD > 15m or over animation budget: skip animate
+    if (dist > LOD_SKIP_ROTATE || animated >= MAX_ANIMATED) continue;
+    animated++;
+
+    const t = _crystalTime + animPhase;
+
+    // Float (epic/legendary/mythic)
+    if (floatAmp > 0 && crystals.length > 0) {
+      crystals[0].position.y = data.baseY + Math.sin(t * 1.4) * floatAmp + 0.22;
+    }
+
+    // Per-rarity rotation
+    for (const mesh of crystals) {
+      switch (rarity) {
+        case 'uncommon':  mesh.rotation.y += dt * 0.55; break;
+        case 'rare':      mesh.rotation.y += dt * 0.9;  mesh.rotation.x += dt * 0.15; break;
+        case 'epic':      mesh.rotation.x += dt * 0.7;  mesh.rotation.y += dt * 1.1;  mesh.rotation.z += dt * 0.4; break;
+        case 'legendary': mesh.rotation.x += dt * 0.5;  mesh.rotation.y += dt * 0.8; break;
+        case 'mythic':    mesh.rotation.x += dt * 0.9;  mesh.rotation.y += dt * 1.2;  mesh.rotation.z += dt * 0.6; break;
+      }
+    }
+
+    // Satellite orbits
+    for (const sat of satellites) {
+      sat.angle += dt * sat.speed;
+      sat.mesh.position.set(
+        data.cx + Math.cos(sat.angle) * sat.dist,
+        sat.baseY + Math.sin(sat.angle * 1.3) * 0.08,
+        data.cz  + Math.sin(sat.angle) * sat.dist,
+      );
+      if (sat.tiltZ) sat.mesh.rotation.z = sat.angle;
+      sat.mesh.rotation.y += dt * 2;
+    }
+
+    // Pulse rings
+    for (const ring of pulseRings) {
+      const pulse = 1.0 + Math.sin(t * 2.2 + animPhase) * 0.12;
+      ring.scale.set(pulse, pulse, 1);
+      if (ring.material) ring.material.opacity = 0.55 + Math.sin(t * 2.2) * 0.2;
+    }
   }
 }
-
-export function getOreDeposits() { return _deposits; }
-function _isDeposit(cx, cz) { return _depositSet.has(`${cx},${cz}`); }
-
-// ── State ────────────────────────────────────────────────────
-let _money = 0;
-const _sphereMeshes = new Map(); // key -> { group, oreCrystals }
-
-export function getMoney()        { return _money; }
-export function addMoney(amount)  { _money = Math.max(0, _money + amount); }
-
-export function getDepthAt(x, z) {
-  const shaft = getShaftAt(x, z);
-  return shaft ? shaft.depth : 0;
-}
-
-// ============================================================
-//  MAIN DIG API — always digs DOWN at player position
-//
-//  Instead of aiming a sphere in the look direction (which often
-//  misses the ground), we dig straight down from the player's
-//  current position. Each punch goes deeper than the last.
-//  This makes digging reliable and satisfying every time.
-// ============================================================
-export function onDig(px, py, pz, yaw, pitch, eyeHeight) {
-  // Find the current dig floor at this position
-  const surfaceY      = getBaseHeightAt(px, pz);
-  const shaft         = getShaftAt(px, pz);
-  const currentFloorY = shaft ? shaft.floorY : surfaceY;
-
-  // Sphere center sits just below the current floor so each dig
-  // pushes deeper. The sphere radius determines how wide the hole is.
-  const digX = px;
-  const digY = currentFloorY - (DIG_SPHERE_R * 0.45);
-  const digZ = pz;
-
-  const result = digSphere(digX, digY, digZ, DIG_SPHERE_R);
-  if (!result) return null;
-
-  const { key, cellX, cellZ, worldX, worldZ, floorY, depth, surfaceY: sY } = result;
-  const layer      = getMaterialAtDepth(depth);
-  const depositHit = layer.name === 'Dense Ore' && _isDeposit(cellX, cellZ);
-
-  const ore = rollOre(layer.name);
-
-  const baseEarned = layer.value + (ore ? ore.value : 0);
-  const earned     = depositHit ? baseEarned * 3 : baseEarned;
-
-  _money += earned;
-
-  _updateSphereVisuals(key, digX, digY, digZ, DIG_SPHERE_R, depth, sY, ore, layer);
-
-  return { layer, ore, depth, earned, totalMoney: _money, isDeposit: depositHit };
