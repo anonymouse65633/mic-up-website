@@ -588,26 +588,15 @@ let _minimapBg = null; // cached ImageBitmap of the static background
 function buildMinimapCache() {
   if (!minimapCtx || !minimapCanvas) return;
 
-  const W    = minimapCanvas.width;
-  const H    = minimapCanvas.height;
   const WORLD = 200;
-  const off   = new OffscreenCanvas(W, H);
-  const ctx   = off.getContext('2d');
+  // Build a full 200×200 world bitmap for dynamic scrolling
+  const off = new OffscreenCanvas(WORLD, WORLD);
+  const ctx = off.getContext('2d');
 
   MINI_ZONES.forEach(({ x, z, w, h, zone }) => {
     ctx.fillStyle = MINI_COLOURS[zone];
-    ctx.fillRect(
-      ((x + 100) / WORLD) * W,
-      ((z + 100) / WORLD) * H,
-      (w / WORLD) * W,
-      (h / WORLD) * H,
-    );
+    ctx.fillRect(x + 100, z + 100, w, h);
   });
-
-  // Border
-  ctx.strokeStyle = 'rgba(255,255,255,0.22)';
-  ctx.lineWidth   = 1;
-  ctx.strokeRect(0.5, 0.5, W - 1, H - 1);
 
   _minimapBg = off.transferToImageBitmap();
 }
@@ -617,46 +606,66 @@ function updateMinimap() {
 
   const W     = minimapCanvas.width;
   const H     = minimapCanvas.height;
-  const WORLD = 200;
 
-  // Composite static background
-  minimapCtx.drawImage(_minimapBg, 0, 0);
+  // Player-centered, zoom = 1.6 world units per pixel
+  const ZOOM   = 1.6;   // higher = more zoomed in
+  const VIEW_W = W / ZOOM;
+  const VIEW_H = H / ZOOM;
 
-  // World-space → minimap pixel
+  // Source rect in the 200x200 world bitmap
+  const srcX = (player.x + 100) - VIEW_W * 0.5;
+  const srcZ = (player.z + 100) - VIEW_H * 0.5;
+
+  minimapCtx.clearRect(0, 0, W, H);
+  minimapCtx.drawImage(_minimapBg, srcX, srcZ, VIEW_W, VIEW_H, 0, 0, W, H);
+
+  // World → canvas coord
   const toM = (wx, wz) => ({
-    mx: ((wx + 100) / WORLD) * W,
-    mz: ((wz + 100) / WORLD) * H,
+    mx: ((wx - player.x) * ZOOM + W * 0.5),
+    mz: ((wz - player.z) * ZOOM + H * 0.5),
   });
 
-  // Remote player dots (colour-coded)
+  // Remote player dots
   for (const p of Object.values(remotePlayers)) {
     const { mx, mz } = toM(p.x, p.z);
+    if (mx < 0 || mz < 0 || mx > W || mz > H) continue;
     minimapCtx.fillStyle = p.colour || '#ffffff';
     minimapCtx.beginPath();
-    minimapCtx.arc(mx, mz, 2.5, 0, Math.PI * 2);
+    minimapCtx.arc(mx, mz, 3, 0, Math.PI * 2);
     minimapCtx.fill();
   }
 
-  // Local player — white dot with player-colour ring + heading tick
-  const { mx: lx, mz: lz } = toM(player.x, player.z);
-
+  // Local player dot (always center)
+  const cx = W * 0.5, cz = H * 0.5;
   minimapCtx.fillStyle   = '#ffffff';
-  minimapCtx.strokeStyle = player.colour;
-  minimapCtx.lineWidth   = 1.5;
+  minimapCtx.strokeStyle = player.colour || '#44ff88';
+  minimapCtx.lineWidth   = 2;
   minimapCtx.beginPath();
-  minimapCtx.arc(lx, lz, 3.5, 0, Math.PI * 2);
+  minimapCtx.arc(cx, cz, 4, 0, Math.PI * 2);
   minimapCtx.fill();
   minimapCtx.stroke();
 
-  // Heading tick (7 px line in facing direction)
-  const bearing = -player.yaw; // world-space bearing (radians, CW from -Z)
+  // Heading arrow
+  const bearing = player.yaw;
   minimapCtx.strokeStyle = '#ffffff';
-  minimapCtx.lineWidth   = 1.5;
+  minimapCtx.lineWidth   = 2;
   minimapCtx.beginPath();
-  minimapCtx.moveTo(lx, lz);
-  minimapCtx.lineTo(lx + Math.sin(bearing) * 7, lz - Math.cos(bearing) * 7);
+  minimapCtx.moveTo(cx, cz);
+  minimapCtx.lineTo(cx + Math.sin(bearing) * 9, cz + Math.cos(bearing) * 9);
   minimapCtx.stroke();
+
+  // Circular clip
+  minimapCtx.globalCompositeOperation = 'destination-in';
+  minimapCtx.beginPath();
+  minimapCtx.arc(W/2, H/2, W/2, 0, Math.PI * 2);
+  minimapCtx.fill();
+  minimapCtx.globalCompositeOperation = 'source-over';
+
+  // Zone label
+  const zoneLabel = document.getElementById('minimapZoneLabel');
+  if (zoneLabel) zoneLabel.textContent = getZoneName(player.x, player.z);
 }
+
 
 // ============================================================
 //  WORLD MAP  (M key — expandable fullscreen overlay)
@@ -910,11 +919,12 @@ function _refreshHotbarSlot(idx) {
   const durFill = slotEl.querySelector('.hotbar-dur-fill');
 
   if (entry && entry.tool) {
+    // Slot has an item — show it
+    slotEl.style.display = '';
     if (iconEl)  iconEl.textContent  = entry.tool.emoji;
     if (labelEl) labelEl.textContent = entry.tool.name.replace(' Shovel', '').replace(' Pickaxe', '');
     slotEl.classList.toggle('broken', entry.durLeft === 0);
 
-    // Durability bar
     if (durBar && entry.tool.durability < 9999) {
       durBar.style.display = '';
       const frac = entry.durLeft / entry.tool.durability;
@@ -926,6 +936,9 @@ function _refreshHotbarSlot(idx) {
       durBar.style.display = 'none';
     }
   } else {
+    // Empty slot — hide unless it's the active slot (always show active)
+    const isActive = (idx === playerInventory.activeSlot);
+    slotEl.style.display = isActive ? '' : 'none';
     if (iconEl)  iconEl.textContent  = '';
     if (labelEl) labelEl.textContent = '';
     if (durBar)  durBar.style.display = 'none';
@@ -934,6 +947,16 @@ function _refreshHotbarSlot(idx) {
 
 function _refreshAllHotbarSlots() {
   for (let i = 0; i < 9; i++) _refreshHotbarSlot(i);
+  // Re-number visible slot keys
+  let visibleIdx = 1;
+  for (let i = 0; i < 9; i++) {
+    const slotEl = document.getElementById(`hotbarSlot${i + 1}`);
+    if (!slotEl) continue;
+    const keyEl = slotEl.querySelector('.hotbar-slot-key');
+    if (slotEl.style.display !== 'none') {
+      if (keyEl) keyEl.textContent = String(visibleIdx++);
+    }
+  }
 }
 
 // ============================================================
@@ -1124,7 +1147,8 @@ function setupChat(name, colour) {
           return;
         }
 
-        const digResult = onDig(player.x, player.z);
+        const EYE_H = 1.62;
+        const digResult = onDig(player.x, player.y, player.z, player.yaw, player.pitch, EYE_H);
         if (digResult) {
           // Collect item into inventory
           const itemId = digResult.ore ? digResult.ore.id : digResult.layer.name;
