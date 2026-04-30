@@ -166,10 +166,7 @@ function _buildCaveBiomeDecor(cx, cy, cz, layer) {
       shard.rotation.set(_rng() * 0.5, _rng() * Math.PI * 2, _rng() * 0.5);
       group.add(shard);
     }
-    // Dim void point light
-    const voidLight = new THREE.PointLight(0x440066, 0.4, 5);
-    voidLight.position.set(cx, cy, cz);
-    group.add(voidLight);
+    // No PointLight — use emissive only to avoid WebGL uniform overflow
   }
 
   _scene.add(group);
@@ -207,10 +204,7 @@ function _buildGeodeRoom(cx, cy, cz, r, layer) {
     group.add(mesh);
   }
 
-  // Central glow
-  const glowLight = new THREE.PointLight(oreColor, 1.5, r * 3);
-  glowLight.position.set(cx, cy, cz);
-  group.add(glowLight);
+  // Central glow — emissive only (no PointLight to avoid WebGL uniform overflow)
 
   _scene.add(group);
   return group;
@@ -243,12 +237,11 @@ function _buildChestMesh(tier) {
   latch.position.set(0, 0.05, 0.22);
   group.add(latch);
 
-  // Glow point light
-  const light = new THREE.PointLight(glowColor, _chestGlowIntensity(tier), 6);
-  light.position.set(0, 0.6, 0);
-  group.add(light);
+  // No PointLight — chest rarity indicated by emissive latch glow only.
+  // Avoids creating hundreds of PointLights across all chest spawns,
+  // which would overflow WebGL's MAX_VERTEX_UNIFORM_VECTORS limit.
 
-  return { group, light };
+  return { group, light: null };
 }
 
 function _spawnChests(surfaceY) {
@@ -311,9 +304,11 @@ function _buildCabin(cx, cz, surfaceY) {
   const ceil = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.15, 3.4), floorMat);
   ceil.position.y = 2.08; group.add(ceil);
 
-  // Interior candle light
-  const light = new THREE.PointLight(0xffcc66, 0.7, 5);
-  light.position.set(0, 1.0, 0); group.add(light);
+  // Interior candle — emissive mesh only (no PointLight)
+  const candleMat = new THREE.MeshLambertMaterial({ color: 0xffcc66, emissive: 0xffcc66, emissiveIntensity: 1.0 });
+  const candleGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.15, 6);
+  const candle    = new THREE.Mesh(candleGeo, candleMat);
+  candle.position.set(0.6, 0.5, 0.6); group.add(candle);
 
   // Sign (thin slab with a prompt label)
   const signGeo = new THREE.BoxGeometry(0.8, 0.35, 0.04);
@@ -358,13 +353,10 @@ function _buildGlowingStone(cx, cz) {
   const mesh = new THREE.Mesh(geo, stoneMat);
   mesh.position.y = 0.25;
   group.add(mesh);
-  const light = new THREE.PointLight(0x4488ff, 0.8, 4);
-  light.position.y = 0.5;
-  group.add(light);
+  // Emissive only — no PointLight (avoids WebGL uniform overflow)
   group.position.set(cx, 0, cz);
   _scene.add(group);
-  _landmarks.push({ cx, cz, group, type: 'glowstone', light, mesh });
-}
+  _landmarks.push({ cx, cz, group, type: 'glowstone', mesh });
 
 // ── Main generation ───────────────────────────────────────────
 
@@ -475,15 +467,14 @@ export function tickCaves(px, py, pz, dt) {
   // Animate chest glow — pulse intensity
   for (const chest of _chests) {
     if (chest.opened) continue;
-    const pulse = chest.glowBase * (0.8 + 0.2 * Math.sin(t * 1.8 + chest.x));
-    chest.light.intensity = pulse;
+    // Chest glow now uses emissive only — no intensity animation needed
+    void chest;
   }
 
   // Animate glowing stone landmarks
   for (const lm of _landmarks) {
     if (lm.type !== 'glowstone') continue;
-    if (lm.light) lm.light.intensity = 0.6 + 0.4 * Math.sin(t * 0.9 + lm.cx);
-    if (lm.mesh)  lm.mesh.rotation.y += dt * 0.3;
+    if (lm.mesh) lm.mesh.rotation.y += dt * 0.3;
   }
 }
 
