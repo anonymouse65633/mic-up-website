@@ -84,6 +84,7 @@
       <div class="minimap-wrap" id="minimapWrap">
         <canvas id="minimapCanvas" width="110" height="110"></canvas>
         <div class="minimap-label" id="minimapZoneLabel">Plains</div>
+        <button id="minimapModeBtn" class="minimap-mode-btn" title="Toggle depth view">📊</button>
       </div>
       <!-- Online counter -->
       <div class="hud hud-tr" id="hudOnline">
@@ -94,11 +95,36 @@
       <div class="hud hud-money" id="hudMoneyPanel">
         <span class="money-coin">💰</span>
         <span id="hudMoney">$0</span>
+        <span id="hudMoneyBadge" class="money-badge hidden"></span>
       </div>
       <!-- Depth / layer indicator -->
       <div class="hud hud-depth-panel" id="hudDepthPanel" style="display:none">
         <span id="hudDepth"></span>
       </div>
+    </div>
+
+    <!-- Inactive warning -->
+    <div id="inactiveWarning" class="inactive-warning hidden">
+      ⏳ Still there? Move to stay in world.
+    </div>
+
+    <!-- Inactivity kick screen -->
+    <div id="inactiveKickScreen" class="inactive-kick-screen hidden">
+      <div class="inactive-kick-box">
+        <div style="font-size:2em;margin-bottom:12px">💤</div>
+        <div style="font-size:1.1em;font-weight:700;margin-bottom:8px">Disconnected for inactivity</div>
+        <button onclick="window.location.reload()" style="margin-top:8px;padding:8px 20px;background:#1e90ff;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:1em">Rejoin</button>
+      </div>
+    </div>
+
+    <!-- Ore toasts (bottom-right) -->
+    <div id="oreToastContainer" class="ore-toast-container"></div>
+
+    <!-- Save progress banner (for guests, shown after 10 min) -->
+    <div id="saveProgressBanner" class="save-progress-banner hidden">
+      <span>🎮 Playing as guest — </span>
+      <button id="saveProgressLink" class="save-link-btn">Link Google to keep progress forever</button>
+      <button id="saveProgressDismiss" class="save-dismiss-btn" aria-label="Dismiss">×</button>
     </div>
 
     <!-- 20-minute terrain reset countdown -->
