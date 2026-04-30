@@ -23,10 +23,16 @@
         <p class="logo-sub">Multiplayer · 3D · Free</p>
       </div>
 
+      <!-- Guest tag shown when resuming anonymous session -->
+      <div id="guestBanner" class="guest-banner hidden">
+        <span>👤 Playing as guest</span>
+        <button id="linkGoogleBtn" class="link-google-mini">Link Google to save forever</button>
+      </div>
+
       <div class="login-form">
         <label class="field-label" for="playerName">YOUR NAME</label>
-        <input id="playerName" class="name-input" type="text" maxlength="16" placeholder="Enter name..." autocomplete="off" spellcheck="false">
-        <div class="char-count"><span id="charCount">0</span>/16</div>
+        <input id="playerName" class="name-input" type="text" maxlength="18" placeholder="Enter name..." autocomplete="off" spellcheck="false">
+        <div class="char-count"><span id="charCount">0</span>/18</div>
 
         <label class="field-label" for="colorPicker">PICK COLOUR</label>
         <div class="color-row" id="colorPicker" role="group" aria-label="Pick a player colour"></div>
@@ -34,6 +40,13 @@
         <button class="join-btn" id="joinBtn" disabled="">
           <span class="btn-text">ENTER WORLD</span>
           <span class="btn-arrow">▶</span>
+        </button>
+
+        <div class="login-divider"><span>or</span></div>
+
+        <button class="google-btn" id="googleSignInBtn">
+          <svg width="18" height="18" viewBox="0 0 48 48" style="vertical-align:middle;margin-right:8px"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.34-8.16 2.34-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path><path fill="none" d="M0 0h48v48H0z"></path></svg>
+          Sign in with Google
         </button>
 
         <p class="online-count">
@@ -50,22 +63,37 @@
         <li><kbd>W A S D</kbd> to move</li>
         <li><kbd>Mouse</kbd> to look around</li>
         <li><kbd>Space</kbd> to jump</li>
+        <li><kbd>Click / E</kbd> to dig</li>
         <li><kbd>T</kbd> to chat &nbsp;·&nbsp; <kbd>ESC</kbd> to unlock mouse</li>
+        <li><kbd>I</kbd> Inventory &nbsp;·&nbsp; <kbd>M</kbd> Map</li>
       </ul>
     </div>
   </main>
 
-  <script src="js/firebase-config.js" type="module"></script>
   <script type="module">
+    import {
+      auth, isConfigured,
+      signInAnonymously, signInWithPopup, linkWithPopup, GoogleAuthProvider, onAuthStateChanged,
+    } from './js/firebase-config.js';
     import { getPlayerCount } from './js/network.js';
 
-    const nameInput = document.getElementById('playerName');
-    const charCount = document.getElementById('charCount');
-    const joinBtn   = document.getElementById('joinBtn');
-    const countEl   = document.getElementById('onlineCount');
+    const nameInput    = document.getElementById('playerName');
+    const charCountEl  = document.getElementById('charCount');
+    const joinBtn      = document.getElementById('joinBtn');
+    const countEl      = document.getElementById('onlineCount');
+    const googleBtn    = document.getElementById('googleSignInBtn');
+    const guestBanner  = document.getElementById('guestBanner');
+    const linkGoogleBtn= document.getElementById('linkGoogleBtn');
 
-    const COLOURS = ['#ff4757','#ffa502','#eccc68','#2ed573','#1e90ff','#a29bfe','#fd79a8','#ffffff'];
-    let selectedColour = COLOURS[Math.floor(Math.random() * COLOURS.length)];
+    // ── 24-colour palette ──────────────────────────────────────
+    const COLOURS = [
+      '#FF4757','#FF6B35','#FFA502','#FFDD59','#7BED9F','#2ED573',
+      '#1E90FF','#70A1FF','#5352ED','#A29BFE','#FD79A8','#E84393',
+      '#ffffff','#dfe6e9','#b2bec3','#636e72',
+      '#6B8C42','#CC8855','#3A3A66','#1A1A2E',
+      '#FF7700','#220033','#88EEFF','#FFD700',
+    ];
+    let selectedColour = localStorage.getItem('ww_colour') || COLOURS[Math.floor(Math.random() * 16)];
     const picker = document.getElementById('colorPicker');
 
     COLOURS.forEach(c => {
@@ -77,12 +105,24 @@
         document.querySelectorAll('.swatch').forEach(s => s.classList.remove('active'));
         btn.classList.add('active');
         selectedColour = c;
+        localStorage.setItem('ww_colour', c);
       });
       picker.appendChild(btn);
     });
 
+    // ── Name input ─────────────────────────────────────────────
+    const savedName = localStorage.getItem('ww_name') || '';
+    if (savedName) {
+      nameInput.value = savedName;
+      charCountEl.textContent = savedName.length;
+      joinBtn.disabled = false;
+    }
+
     nameInput.addEventListener('input', () => {
-      charCount.textContent = nameInput.value.length;
+      // Basic profanity filter: strip special chars
+      const clean = nameInput.value.replace(/[^a-zA-Z0-9_\- ]/g, '');
+      if (clean !== nameInput.value) nameInput.value = clean;
+      charCountEl.textContent = nameInput.value.length;
       joinBtn.disabled = nameInput.value.trim().length < 1;
     });
 
@@ -90,19 +130,87 @@
       if (e.key === 'Enter' && !joinBtn.disabled) joinBtn.click();
     });
 
-    joinBtn.addEventListener('click', () => {
+    // ── Auth state ─────────────────────────────────────────────
+    let _currentUser = null;
+    if (isConfigured && auth) {
+      onAuthStateChanged(auth, user => {
+        _currentUser = user;
+        if (user && user.isAnonymous) {
+          guestBanner.classList.remove('hidden');
+        } else if (user && !user.isAnonymous) {
+          guestBanner.classList.add('hidden');
+        }
+      });
+    }
+
+    // ── Enter World (guest anonymous) ─────────────────────────
+    joinBtn.addEventListener('click', async () => {
       const name = nameInput.value.trim();
       if (!name) return;
+      localStorage.setItem('ww_name', name);
+      localStorage.setItem('ww_colour', selectedColour);
       sessionStorage.setItem('playerName',   name);
       sessionStorage.setItem('playerColour', selectedColour);
-      window.location.href = 'game.html';
+      sessionStorage.setItem('playerGuest',  'true');
+
+      if (isConfigured && auth && !_currentUser) {
+        try {
+          const cred = await signInAnonymously(auth);
+          sessionStorage.setItem('playerUID', cred.user.uid);
+        } catch(e) {
+          console.warn('[Auth] anonymous sign-in failed', e);
+        }
+      } else if (_currentUser) {
+        sessionStorage.setItem('playerUID', _currentUser.uid);
+        sessionStorage.setItem('playerGuest', _currentUser.isAnonymous ? 'true' : 'false');
+      }
+
+      // Camera-dive animation then navigate
+      document.body.style.transition = 'filter 0.4s, transform 0.4s';
+      document.body.style.filter = 'saturate(0) blur(4px)';
+      document.body.style.transform = 'scale(1.08)';
+      setTimeout(() => { window.location.href = 'game.html'; }, 420);
     });
 
-    try {
-      getPlayerCount(n => { countEl.textContent = n; });
-    } catch (_) {
-      countEl.textContent = '?';
-    }
+    // ── Google Sign-In ─────────────────────────────────────────
+    googleBtn.addEventListener('click', async () => {
+      if (!isConfigured || !auth) {
+        alert('Firebase not configured. Set up firebase-config.js first.');
+        return;
+      }
+      const provider = new GoogleAuthProvider();
+      try {
+        let result;
+        if (_currentUser && _currentUser.isAnonymous) {
+          result = await linkWithPopup(_currentUser, provider);
+        } else {
+          result = await signInWithPopup(auth, provider);
+        }
+        const user = result.user;
+        // Pre-fill name from Google if empty
+        if (!nameInput.value.trim() && user.displayName) {
+          const gName = user.displayName.replace(/[^a-zA-Z0-9_\- ]/g,'').slice(0,18);
+          nameInput.value = gName;
+          charCountEl.textContent = gName.length;
+          joinBtn.disabled = gName.length < 1;
+          localStorage.setItem('ww_name', gName);
+        }
+        guestBanner.classList.add('hidden');
+        googleBtn.textContent = '✅ Signed in with Google';
+        googleBtn.disabled = true;
+      } catch(e) {
+        if (e.code !== 'auth/popup-closed-by-user') {
+          console.error('[Auth] Google sign-in error', e);
+          alert('Sign-in failed: ' + e.message);
+        }
+      }
+    });
+
+    // ── Link Google from banner ────────────────────────────────
+    linkGoogleBtn?.addEventListener('click', () => googleBtn.click());
+
+    // ── Online count ───────────────────────────────────────────
+    try { getPlayerCount(n => { countEl.textContent = n; }); } catch(_) { countEl.textContent = '?'; }
   </script>
 
 
