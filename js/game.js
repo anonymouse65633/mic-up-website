@@ -1298,7 +1298,7 @@ function setupShop() {
     if (nameEl) nameEl.textContent = name;
     document.getElementById('reportModal')?.classList.remove('hidden');
   };
-
+}
 
 function _updateShopProximity(px, pz) {
   const nearest = getNearestShop(px, pz);
