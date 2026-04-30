@@ -2622,3 +2622,135 @@
   color: #888; cursor: pointer; font-size: 16px; padding: 0 2px;
 }
 .save-dismiss-btn:hover { color: #fff; }
+
+/* ══════════════════════════════════════════════════════════
+   PART 8 — Shop redesign, depth gates, purchase anim, report
+   ══════════════════════════════════════════════════════════ */
+
+/* 6-tab shop row */
+.shop-tabs { flex-wrap: wrap; gap: 3px; }
+.shop-tab  { font-size: 9px; padding: 5px 8px; min-width: 0; flex: 1; }
+
+/* Depth-locked cards */
+.shop-item-card.shop-locked {
+  opacity: 0.55;
+  background: rgba(20,20,40,0.5);
+  border-color: #333;
+}
+.shop-item-card.shop-locked .shop-item-emoji { filter: grayscale(1); }
+
+/* Depth badge */
+.shop-depth-badge {
+  position: absolute;
+  top: 6px; right: 6px;
+  background: rgba(255,80,0,0.18);
+  color: #ff7040;
+  font-size: 8px;
+  font-family: 'Press Start 2P', monospace;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid rgba(255,80,0,0.35);
+  letter-spacing: 0;
+}
+.shop-item-card { position: relative; }
+
+/* Craft requirement label */
+.shop-craft-req {
+  font-size: 9px;
+  color: #99ccff;
+  font-family: 'VT323', monospace;
+}
+
+/* Purchase flash animation */
+@keyframes shopBuyFlash {
+  0%   { transform: scale(1);    box-shadow: none; }
+  30%  { transform: scale(1.06); box-shadow: 0 0 18px 4px rgba(0,255,100,0.55); }
+  60%  { transform: scale(1.03); box-shadow: 0 0 10px 2px rgba(0,255,100,0.30); }
+  100% { transform: scale(1);    box-shadow: none; }
+}
+.shop-item-card.shop-buy-flash {
+  animation: shopBuyFlash 0.55s ease-out forwards;
+  border-color: #00ff77 !important;
+}
+
+/* Coin counter tick */
+@keyframes moneyTick {
+  0%   { color: #00ff88; transform: scale(1.08); }
+  100% { color: inherit;  transform: scale(1); }
+}
+.shop-money.shop-money-tick { animation: moneyTick 0.3s ease-out; }
+
+/* ── Report modal ──────────────────────────────────────── */
+.report-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+.report-modal.hidden { display: none; }
+.report-modal-box {
+  background: #12121e;
+  border: 2px solid #ff4444;
+  border-radius: 10px;
+  padding: 22px 28px;
+  min-width: 280px;
+  text-align: center;
+  font-family: 'Press Start 2P', monospace;
+}
+.report-modal-title {
+  font-size: 12px;
+  color: #ff4444;
+  margin-bottom: 10px;
+}
+.report-modal-name {
+  font-size: 11px;
+  color: #fff;
+  margin-bottom: 6px;
+}
+.report-modal-reason {
+  font-size: 9px;
+  color: #aaa;
+  margin-bottom: 18px;
+}
+.report-modal-btns { display: flex; gap: 10px; justify-content: center; }
+.report-confirm-btn {
+  background: #ff3333;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 9px;
+  cursor: pointer;
+}
+.report-confirm-btn:hover { background: #ff5555; }
+.report-cancel-btn {
+  background: #333;
+  color: #aaa;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 9px;
+  cursor: pointer;
+}
+.report-cancel-btn:hover { color: #fff; background: #444; }
+
+/* ── Report flag on nameplate (drawn via overlay canvas)
+      Actual flag button appended by game.js on click ───── */
+.report-flag-btn {
+  position: fixed;
+  background: rgba(180,0,0,0.75);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 2px 5px;
+  font-size: 10px;
+  cursor: pointer;
+  pointer-events: all;
+  z-index: 800;
+  display: none;
+}
