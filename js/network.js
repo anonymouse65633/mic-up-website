@@ -1,5 +1,6 @@
 // ============================================================
 //  WalkWorld 3D — network.js
+//  Part 7: join/leave debounce (15s), online presence via onDisconnect
 // ============================================================
 
 import { db, isConfigured } from './firebase-config.js';
@@ -11,6 +12,11 @@ import {
 let _playerId      = null;
 let _playerRef     = null;
 let _unsubscribers = [];
+
+// Debounce join/leave — only announce if absent > 15s
+let _joinedAt  = 0;
+let _leftAt    = 0;
+const JOIN_LEAVE_DEBOUNCE = 15_000;
 
 const PATHS = {
   players: ()   => ref(db, 'players'),
@@ -26,6 +32,7 @@ export async function joinGame(playerData) {
 
   _playerRef = push(PATHS.players());
   _playerId  = _playerRef.key;
+  _joinedAt  = Date.now();
 
   await set(_playerRef, {
     name:      playerData.name,
@@ -35,18 +42,29 @@ export async function joinGame(playerData) {
     z:         playerData.z         ?? 0,
     rotationY: playerData.rotationY ?? 0,
     joinedAt:  serverTimestamp(),
+    online:    true,
   });
 
   onDisconnect(_playerRef).remove();
-  _pushSystemChat(`${playerData.name} joined the world`);
+
+  // Only announce if not a quick rejoin (was absent > 15s)
+  if (Date.now() - _leftAt > JOIN_LEAVE_DEBOUNCE) {
+    _pushSystemChat(`${playerData.name} joined the world`, 'join');
+  }
 
   return _playerId;
 }
 
 export async function leaveGame(playerName) {
   if (!_playerRef) return;
+  _leftAt = Date.now();
   onDisconnect(_playerRef).cancel();
-  _pushSystemChat(`${playerName} left the world`);
+
+  // Only announce if was in game > 15s
+  if (Date.now() - _joinedAt > JOIN_LEAVE_DEBOUNCE) {
+    _pushSystemChat(`${playerName} left the world`, 'leave');
+  }
+
   await remove(_playerRef);
   _unsubscribers.forEach(fn => fn());
   _unsubscribers = [];
@@ -121,6 +139,7 @@ export function sendChat(msg) {
     text:   msg.text.trim().slice(0, 80),
     time:   serverTimestamp(),
     system: false,
+    type:   msg.type || 'player',
   });
   _pruneChat(40);
 }
@@ -136,6 +155,7 @@ export function onChat(callback) {
       colour: m.colour || '#ffffff',
       text:   m.text   || '',
       system: m.system || false,
+      type:   m.type   || 'player',
     }));
     callback(msgs);
   });
@@ -145,10 +165,10 @@ export function onChat(callback) {
   return unsubFn;
 }
 
-function _pushSystemChat(text) {
+function _pushSystemChat(text, type = 'system') {
   if (!isConfigured) return;
   const newMsg = push(PATHS.chat());
-  set(newMsg, { name: '', colour: '#6868a8', text, time: serverTimestamp(), system: true });
+  set(newMsg, { name: '', colour: '#6868a8', text, time: serverTimestamp(), system: true, type });
   _pruneChat(40);
 }
 
