@@ -1681,3 +1681,69 @@
   border-radius: 4px;
   margin-top: 2px;
 }
+
+/* ══════════════════════════════════════════════════════════
+   UNDERGROUND ESCAPE PANEL
+   Appears when the player is more than 1m below surface.
+   Centered on screen, above the hotbar.
+   ══════════════════════════════════════════════════════════ */
+.underground-escape {
+  position: fixed;
+  left: 50%;
+  bottom: 110px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  z-index: 90;
+  transition: opacity 0.3s, transform 0.3s;
+  pointer-events: auto;
+}
+
+.underground-escape.hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%) translateY(16px);
+}
+
+.ug-depth-label {
+  font-family: var(--font-vt), monospace;
+  font-size: 15px;
+  color: rgba(255, 180, 80, 0.95);
+  text-shadow: 0 0 8px rgba(255, 120, 0, 0.6), 0 1px 3px rgba(0,0,0,0.9);
+  letter-spacing: 1px;
+  text-align: center;
+}
+
+.ug-teleport-btn {
+  background: linear-gradient(135deg, rgba(30,20,10,0.96), rgba(60,35,15,0.95));
+  border: 2px solid rgba(255, 160, 50, 0.85);
+  border-radius: 10px;
+  color: #ffd080;
+  font-family: var(--font-pixel), monospace;
+  font-size: 10px;
+  padding: 10px 22px;
+  cursor: pointer;
+  letter-spacing: 1px;
+  box-shadow:
+    0 0 20px rgba(255, 140, 0, 0.45),
+    inset 0 1px 0 rgba(255,220,100,0.15);
+  transition: all 0.15s;
+  text-shadow: 0 0 8px rgba(255, 180, 60, 0.7);
+  white-space: nowrap;
+}
+
+.ug-teleport-btn:hover {
+  background: linear-gradient(135deg, rgba(60,35,10,0.97), rgba(100,55,15,0.97));
+  border-color: rgba(255, 200, 80, 1);
+  color: #ffe090;
+  box-shadow:
+    0 0 30px rgba(255, 160, 0, 0.65),
+    inset 0 1px 0 rgba(255,240,120,0.2);
+  transform: scale(1.04);
+}
+
+.ug-teleport-btn:active {
+  transform: scale(0.97);
+}
