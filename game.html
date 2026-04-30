@@ -49,6 +49,11 @@
       <div class="ch-h"></div>
       <div class="ch-v"></div>
     </div>
+    <!-- Progress ring — drawn by game.js when punching multi-hit layers -->
+    <canvas id="progressRingCanvas" width="72" height="72"
+      style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+             pointer-events:none;z-index:200;opacity:0;transition:opacity 0.15s"
+      aria-hidden="true"></canvas>
 
     <!-- ══════════════════════════════════════════════════
          CoD-STYLE COMPASS BAR  (top centre)
@@ -148,8 +153,16 @@
     <div id="undergroundEscape" class="underground-escape hidden">
       <div class="ug-depth-label" id="ugDepthLabel">⛏ 5.0m underground</div>
       <button id="ugTeleportBtn" class="ug-teleport-btn">
-        🏛 Teleport to Plaza
+        <span>Hold <kbd>T</kbd> to teleport</span>
       </button>
+    </div>
+
+    <!-- ── Teleport Radial Wheel (hold T) ── -->
+    <div id="teleportWheel" class="tp-wheel hidden" aria-hidden="true">
+      <div class="tp-wheel-ring" id="tpWheelRing"></div>
+      <div class="tp-wheel-center">
+        <div style="font-size:11px;color:#aaa;margin-top:4px">Hold T</div>
+      </div>
     </div>
 
     <!-- ══════════════════════════════════════════════════
