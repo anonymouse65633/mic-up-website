@@ -60,6 +60,17 @@ import {
 // ── Part 5: AI Content ───────────────────────────────────────
 import { getChestLoot, getCabinLore, getOreDesc, getDailyChallenges, getDepositHint } from './aiContent.js';
 
+// ── Part 6: Prestige & Rare Items ────────────────────────────
+import {
+  initPrestige, addLifetimeCoins, addPrestigeXP, grantRareItem, hasRareItem,
+  getPrestigeMultiplier, isPrestigeAvailable, performPrestige,
+  getPrestigeState, getAllRareItemDefs,
+  setOnPrestigeReady, setOnRareItemGranted,
+} from './prestige.js';
+import {
+  spawnRareItemsInWorld, tickRareItems, spawnMeteorShards, setOnRareItemPickup,
+} from './rareItems.js';
+
 // ============================================================
 //  SETTINGS
 //  Stored in sessionStorage so they persist across page reloads
@@ -316,7 +327,7 @@ async function init() {
       chatEl.appendChild(div);
       chatEl.scrollTop = chatEl.scrollHeight;
     },
-    (wx, wz) => spawnMeteor(wx, wz, 0),
+    (wx, wz) => { spawnMeteor(wx, wz, 0); spawnMeteorShards(wx, wz, 0, 2); },
   );
 
 
@@ -325,6 +336,15 @@ async function init() {
 
   // Pre-generate vein cells for all layers (deterministic per session)
   generateOreVeins(Date.now() & 0xFFFF);
+
+  // ── Part 6: Prestige + Rare Items ────────────────────────────
+  initPrestige();
+  setOnPrestigeReady(() => _onPrestigeReady());
+  setOnRareItemGranted((id, data) => _onRareItemGranted(id, data));
+  setOnRareItemPickup((id, data) => { grantRareItem(id); });
+  const _caveData = getCaveData();
+  spawnRareItemsInWorld(_caveData.caves, _caveData.geodes, _caveData.cabins);
+  _refreshPrestigeBadge();
 
   // Initialise the 20-minute reset countdown
   _resetSecondsLeft = RESET_DURATION;
@@ -459,6 +479,7 @@ function gameLoop(timestamp) {
   tickAtmosphere(_playerDepth, dt);
   tickCaves(player.x, player.y, player.z, dt);
   tickEvents(timestamp);
+  tickRareItems(player.x, player.y, player.z, dt);  // Part 6
 
   renderer.draw(player, remotePlayers, timestamp);
 
@@ -1363,6 +1384,22 @@ function _performDig() {
     digResult.eventMult  = _eventMult;
     digResult.totalMoney = getMoney();
   }
+  // ── Part 6: Apply prestige coin multiplier ───────────────
+  if (digResult.earned) {
+    const pMult = getPrestigeMultiplier();
+    if (pMult > 1.0) {
+      const presBonus = Math.round(digResult.earned * (pMult - 1.0));
+      addMoney(presBonus);
+      digResult.earned += presBonus;
+    }
+    addLifetimeCoins(digResult.earned);
+  }
+
+  // ── Part 6: Sunstone ore auto-grants rare item ────────────
+  if (digResult.ore?.id === 'sunstone') {
+    grantRareItem('sunstone');
+  }
+
   // Void Surge: boost ore roll chance (flag for notif)
   if (getVoidSurgeActive() && digResult.layer?.name === 'The Void') {
     digResult.voidSurge = true;
@@ -1407,7 +1444,12 @@ function _performDig() {
   }
 
   // ── Part 4: Discovery event system ──────────────────────
-  if (digResult.ore) _triggerDiscoveryEvent(digResult.ore, digResult.depth);
+  if (digResult.ore) {
+    _triggerDiscoveryEvent(digResult.ore, digResult.depth);
+    // Part 6: award prestige XP based on ore rarity
+    const xpMap = { common:2, uncommon:5, rare:15, epic:35, legendary:80, mythic:200 };
+    addPrestigeXP(xpMap[digResult.ore.rarity] ?? 2);
+  }
 }
 
 // ============================================================
@@ -2625,6 +2667,173 @@ function showDisconnected() {
 
 const tick  = () => new Promise(r => requestAnimationFrame(r));
 const delay = ms  => new Promise(r => setTimeout(r, ms));
+
+// ============================================================
+//  PART 6 — PRESTIGE & RARE ITEMS
+// ============================================================
+
+function _refreshPrestigeBadge() {
+  const state = getPrestigeState();
+  const badge = document.getElementById('prestigeBadge');
+  const btn   = document.getElementById('btnPrestige');
+  if (!badge) return;
+
+  if (state.level === 0) {
+    badge.textContent = '';
+    badge.className   = 'prestige-badge';
+  } else {
+    badge.textContent = `P${state.level}`;
+    const cls = state.level >= 5 ? 'prestige-badge p5plus'
+              : state.level >= 3 ? 'prestige-badge p3'
+              : state.level >= 2 ? 'prestige-badge p2'
+              : 'prestige-badge p1';
+    badge.className = cls;
+  }
+
+  if (btn) {
+    btn.classList.toggle('prestige-ready', state.available);
+    btn.title = state.available
+      ? `⭐ Prestige ${state.level + 1} available!`
+      : `⭐ Prestige (${state.lifetimeCoins.toLocaleString()} / ${state.threshold.toLocaleString()} coins)`;
+  }
+
+  window._playerPrestige = state.level;
+}
+
+function _onPrestigeReady() {
+  _refreshPrestigeBadge();
+  const btn = document.getElementById('btnPrestige');
+  if (btn) btn.classList.add('prestige-ready');
+  // Toast notification
+  _showRareItemToast('⭐', 'Prestige Available!', 'You can now Prestige! Open ⭐ to continue.', '#ffd700');
+}
+
+function _onRareItemGranted(id, data) {
+  _refreshPrestigeBadge();
+  _showRareItemToast(data.emoji ?? '📦', data.name ?? id, data.desc ?? '', '#88eeff');
+}
+
+function _showRareItemToast(emoji, title, desc, color) {
+  const container = document.getElementById('rareItemToasts');
+  if (!container) return;
+  const el = document.createElement('div');
+  el.className = 'rare-toast';
+  el.style.borderColor = color;
+  el.innerHTML = `<span class="rt-emoji">${emoji}</span><div class="rt-body"><div class="rt-title" style="color:${color}">${title}</div><div class="rt-desc">${desc}</div></div>`;
+  container.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('visible'));
+  setTimeout(() => {
+    el.classList.remove('visible');
+    setTimeout(() => el.remove(), 400);
+  }, 4000);
+}
+
+function _showPrestigeOverlay() {
+  const ov = document.getElementById('prestigeOverlay');
+  if (!ov) return;
+  const state = getPrestigeState();
+  const defs  = getAllRareItemDefs();
+
+  // Update stats
+  document.getElementById('psLevel').textContent  = state.level;
+  document.getElementById('psMult').textContent   = `×${state.multiplier.toFixed(1)}`;
+  document.getElementById('psXP').textContent     = state.prestigeXP.toLocaleString();
+  document.getElementById('psXPTier').textContent = state.xpTier.label;
+  document.getElementById('psCoins').textContent  = `$${state.lifetimeCoins.toLocaleString()}`;
+  document.getElementById('psThresh').textContent = state.threshold < Infinity ? `$${state.threshold.toLocaleString()}` : 'MAX';
+
+  // Progress bar
+  const pct = Math.min(state.progress * 100, 100);
+  document.getElementById('psProgressBar').style.width = pct + '%';
+  document.getElementById('psProgressPct').textContent = Math.floor(pct) + '%';
+
+  // Rare item requirement
+  const reqEl = document.getElementById('psReqItem');
+  if (state.reqItem && defs[state.reqItem]) {
+    const d = defs[state.reqItem];
+    reqEl.textContent = `${d.emoji} ${d.name} required for P${state.level + 1}`;
+    reqEl.style.color = state.reqItemMet ? '#5ddb80' : '#ff8855';
+    reqEl.style.display = '';
+  } else {
+    reqEl.style.display = 'none';
+  }
+
+  // Rare items list
+  const listEl = document.getElementById('psRareList');
+  listEl.innerHTML = '';
+  for (const [id, d] of Object.entries(defs)) {
+    const owned = hasRareItem(id);
+    const li = document.createElement('div');
+    li.className = 'ps-rare-item' + (owned ? ' owned' : '');
+    li.innerHTML = `<span>${d.emoji}</span><span>${d.name}</span>`;
+    listEl.appendChild(li);
+  }
+
+  // Prestige button
+  const actBtn = document.getElementById('psActionBtn');
+  if (state.available) {
+    actBtn.textContent = `⭐ Prestige to P${state.level + 1}`;
+    actBtn.disabled = false;
+    actBtn.className = 'ps-action-btn available';
+  } else if (state.level >= 10) {
+    actBtn.textContent = '🏆 Max Prestige Reached!';
+    actBtn.disabled = true;
+    actBtn.className = 'ps-action-btn maxed';
+  } else {
+    actBtn.textContent = `⭐ Need $${state.threshold.toLocaleString()} lifetime coins`;
+    actBtn.disabled = true;
+    actBtn.className = 'ps-action-btn';
+  }
+
+  ov.classList.remove('hidden');
+}
+
+function _doPrestige() {
+  if (!isPrestigeAvailable()) return;
+  const prevLevel = getPrestigeState().level;
+  const ok = performPrestige();
+  if (!ok) return;
+  const state = getPrestigeState();
+
+  // Full-screen ceremony
+  const ceremony = document.getElementById('prestigeCeremony');
+  if (ceremony) {
+    document.getElementById('pcLevel').textContent = `P${state.level}`;
+    document.getElementById('pcMult').textContent  = `+${(state.multiplier - 1) * 100 | 0}% coin bonus active`;
+    ceremony.classList.remove('hidden');
+    setTimeout(() => ceremony.classList.add('hidden'), 3000);
+  }
+
+  _refreshPrestigeBadge();
+  _showPrestigeOverlay();  // refresh overlay
+
+  // Announce to chat
+  const name = sessionStorage.getItem('playerName') || 'A miner';
+  const msg  = `⭐ ${name} prestiged to P${state.level}! (×${state.multiplier.toFixed(1)} coins)`;
+  sendChat(msg).catch(() => {});
+}
+
+// Wire prestige button click
+document.addEventListener('DOMContentLoaded', () => {
+  const btn = document.getElementById('btnPrestige');
+  if (btn) btn.addEventListener('click', () => {
+    if (!document.getElementById('prestigeOverlay')?.classList.contains('hidden')) {
+      document.getElementById('prestigeOverlay').classList.add('hidden');
+    } else {
+      _showPrestigeOverlay();
+    }
+  });
+
+  document.getElementById('psCloseBtn')?.addEventListener('click', () => {
+    document.getElementById('prestigeOverlay')?.classList.add('hidden');
+  });
+
+  document.getElementById('psActionBtn')?.addEventListener('click', _doPrestige);
+
+  document.getElementById('pcCloseBtn')?.addEventListener('click', () => {
+    document.getElementById('prestigeCeremony')?.classList.add('hidden');
+  });
+});
 
 // ============================================================
 //  START
