@@ -17,7 +17,7 @@
 
 import { Player, camera, requestPointerLock, isPointerLocked } from './player.js';
 import { Renderer }   from './renderer.js';
-import { initWorld, getZoneName, resetTerrain } from './world.js';
+import { initWorld, getZoneName, resetTerrain, getBaseHeightAt } from './world.js';
 import { initObjects } from './objects.js';
 import {
   joinGame,
@@ -318,6 +318,7 @@ function gameLoop(timestamp) {
   updateCompass();
   updateMinimap();
   if (isMapOpen) drawMap();
+  _updateUndergroundEscape();
 
   // Shop proximity check
   _updateShopProximity(player.x, player.z);
@@ -410,6 +411,29 @@ async function _doTerrainReset() {
   // Hide the overlay and resume
   if (overlay) overlay.classList.remove('visible');
   rafId = requestAnimationFrame(gameLoop);
+}
+
+// ============================================================
+//  UNDERGROUND ESCAPE BUTTON
+//  Shows a teleport button when the player is more than 1m
+//  below the original terrain surface — helping them get out.
+// ============================================================
+function _updateUndergroundEscape() {
+  const panel = document.getElementById('undergroundEscape');
+  const label = document.getElementById('ugDepthLabel');
+  if (!panel || !player) return;
+
+  const surfaceY = getBaseHeightAt ? getBaseHeightAt(player.x, player.z) : 0;
+
+  // Show when player is more than 1.2m below original surface
+  const depthBelow = surfaceY - player.y;
+
+  if (depthBelow > 1.2) {
+    panel.classList.remove('hidden');
+    if (label) label.textContent = `⛏ ${depthBelow.toFixed(1)}m underground`;
+  } else {
+    panel.classList.add('hidden');
+  }
 }
 
 // ============================================================
@@ -1075,17 +1099,22 @@ function setupMap() {
   }, { passive: false });
 }
 function setupPointerLock() {
-  // Clicking the canvas captures the mouse (no "click to play" overlay needed)
-  gameCanvas.addEventListener('click', () => {
-    if (!isPointerLocked()) requestPointerLock(gameCanvas);
+  // LEFT CLICK: acquire pointer lock if not locked, otherwise DIG
+  gameCanvas.addEventListener('mousedown', e => {
+    if (e.button !== 0) return; // left button only
+
+    if (!isPointerLocked()) {
+      requestPointerLock(gameCanvas);
+      return;
+    }
+
+    // Dig on left click (same logic as E key dig)
+    if (!isChatOpen && !isPauseOpen && !isShopOpen() && !isInventoryOpen) {
+      _performDig();
+    }
   });
 
-  // pointerlockchange: open the pause menu whenever the browser releases
-  // pointer lock.  Chrome intercepts the FIRST ESC to show its
-  // "press and hold ESC to exit" notification (consuming that keydown),
-  // so the keydown handler alone requires two ESC presses.  Hooking
-  // pointerlockchange means we react the instant the lock drops —
-  // regardless of whether Chrome swallowed the keydown or not.
+  // pointerlockchange: open the pause menu whenever the browser releases lock
   document.addEventListener('pointerlockchange', () => {
     if (!isPointerLocked() && !isChatOpen && !isMapOpen && !isPauseOpen) {
       openPauseMenu();
@@ -1095,6 +1124,51 @@ function setupPointerLock() {
   document.addEventListener('pointerlockerror', () => {
     console.warn('[Game] Pointer lock request denied.');
   });
+
+  // ── Underground teleport button ──────────────────────────
+  document.getElementById('ugTeleportBtn')?.addEventListener('click', e => {
+    e.stopPropagation();
+    if (player) {
+      player.x  = 0;
+      player.y  = 2.0;
+      player.z  = 5;
+      player.vy = 0;
+      player.onGround = false;
+    }
+  });
+}
+
+// ── Shared dig logic (used by mouse click AND E key) ─────────
+function _performDig() {
+  if (!isPointerLocked()) return;
+
+  const now = performance.now();
+  if (now - _lastDigTime < _getDigCooldown()) return;
+  _lastDigTime = now;
+
+  if (playerInventory.isActiveBroken()) {
+    _showDigNotif('broken');
+    return;
+  }
+
+  const EYE_H = 1.62;
+  const digResult = onDig(player.x, player.y, player.z, player.yaw, player.pitch, EYE_H);
+  if (digResult) {
+    const itemId   = digResult.ore ? digResult.ore.id : digResult.layer.name;
+    const itemName = digResult.ore ? digResult.ore.name : digResult.layer.name;
+    const collected = playerInventory.addItem(itemId, itemName);
+    if (!collected) digResult.bagFull = true;
+
+    const broke = playerInventory.damageTool(1);
+    if (broke) digResult.toolBroke = true;
+
+    _showDigNotif(digResult);
+    _refreshHotbarSlot(playerInventory.activeSlot);
+    _updateInvCapacityUI();
+    _updateMoneyHUD(getMoney());
+  } else {
+    _showDigNotif(getZoneName(player.x, player.z) === 'Plaza' ? null : 'maxdepth');
+  }
 }
 
 // ============================================================
@@ -1134,40 +1208,8 @@ function setupChat(name, colour) {
       if (isShopOpen()) { closeShop(); return; }
       if (isInventoryOpen) { closeInventory(); return; }
 
-      // Dig (only when pointer locked)
-      if (!isPointerLocked()) return;
-
-      const now = performance.now();
-      if (now - _lastDigTime >= _getDigCooldown()) {
-        _lastDigTime = now;
-
-        // Check if active tool is broken
-        if (playerInventory.isActiveBroken()) {
-          _showDigNotif('broken');
-          return;
-        }
-
-        const EYE_H = 1.62;
-        const digResult = onDig(player.x, player.y, player.z, player.yaw, player.pitch, EYE_H);
-        if (digResult) {
-          // Collect item into inventory
-          const itemId = digResult.ore ? digResult.ore.id : digResult.layer.name;
-          const itemName = digResult.ore ? digResult.ore.name : digResult.layer.name;
-          const collected = playerInventory.addItem(itemId, itemName);
-          if (!collected) digResult.bagFull = true;
-
-          // Damage active tool
-          const broke = playerInventory.damageTool(1);
-          if (broke) digResult.toolBroke = true;
-
-          _showDigNotif(digResult);
-          _refreshHotbarSlot(playerInventory.activeSlot);
-          _updateInvCapacityUI();
-          _updateMoneyHUD(getMoney());
-        } else {
-          _showDigNotif(getZoneName(player.x, player.z) === 'Plaza' ? null : 'maxdepth');
-        }
-      }
+      // Dig on E key too (as fallback)
+      _performDig();
       return;
     }
 
