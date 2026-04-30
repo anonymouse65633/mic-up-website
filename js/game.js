@@ -17,7 +17,7 @@
 
 import { Player, camera, requestPointerLock, isPointerLocked } from './player.js';
 import { Renderer }   from './renderer.js';
-import { initWorld, getZoneName, resetTerrain, getBaseHeightAt } from './world.js';
+import { initWorld, scene, getZoneName, resetTerrain, getBaseHeightAt } from './world.js';
 import { initObjects } from './objects.js';
 import {
   joinGame,
@@ -39,6 +39,22 @@ import {
   saveLocalCharConfig,
   DEFAULT_CHAR_CONFIG,
 } from './character.js';
+
+// ── Part 2 systems ───────────────────────────────────────────
+import {
+  initAtmosphere, tickAtmosphere, setHeadlampOwned, flashLayerColour,
+} from './atmosphere.js';
+
+import {
+  initCaves, tickCaves, setOnChestOpen, onInteractKey as cavesInteract,
+  spawnMeteor, getCaveData,
+} from './caves.js';
+
+import {
+  initWorldEvents, tickEvents,
+  getOreRushMultiplier, getVoidSurgeActive, getMeteorSiteBonus,
+  getActiveEventSummary, getMeteorMinimapMarker,
+} from './events.js';
 
 // ============================================================
 //  SETTINGS
@@ -242,6 +258,36 @@ async function init() {
   // Populate the scene (trees, rocks, cabin, plaza, etc.)
   initObjects();
 
+  // ── Part 2: Atmosphere, Caves, World Events ──────────────
+  // Grab the lights that initWorld() created so atmosphere.js can lerp them
+  const _ambLight = scene.children.find(c => c.isAmbientLight);
+  const _sunLight  = scene.children.find(c => c.isDirectionalLight);
+  initAtmosphere(scene, _ambLight, _sunLight, camera);
+
+  // Seeded procedural cave + chest + landmark generation
+  initCaves(0xCAFEBABE);
+
+  // Set up AI chest open handler
+  setOnChestOpen((chest) => {
+    _handleChestOpen(chest);
+  });
+
+  // World events — pass chat broadcaster and meteor spawner
+  initWorldEvents(
+    window._firebaseDB ?? null,
+    (msg, type) => {
+      const chatEl = document.getElementById('chatMessages');
+      if (!chatEl) return;
+      const div = document.createElement('div');
+      div.className = 'chat-msg chat-event';
+      div.innerHTML = `<span style="color:#ffd700;font-weight:600">${msg}</span>`;
+      chatEl.appendChild(div);
+      chatEl.scrollTop = chatEl.scrollHeight;
+    },
+    (wx, wz) => spawnMeteor(wx, wz, 0),
+  );
+
+
   // Ask Gemini to seed ore deposit hot-spots for this session
   generateOreDeposits().catch(() => {});  // async, non-blocking
 
@@ -370,6 +416,12 @@ function gameLoop(timestamp) {
   // Physics ticks for dig effects
   tickParticles(dt);
   tickCameraShake(camera, dt);
+
+  // Part 2 ticks
+  const _playerDepth = getDepthAt(player.x, player.z);
+  tickAtmosphere(_playerDepth, dt);
+  tickCaves(player.x, player.y, player.z, dt);
+  tickEvents(timestamp);
 
   renderer.draw(player, remotePlayers, timestamp);
 
@@ -1237,6 +1289,22 @@ function _performDig() {
   // ── Full dig landed ─────────────────────────────────────
   _punchProgress = 0;
 
+  // ── Part 2: Apply world-event multipliers ───────────────
+  const _rushMult   = getOreRushMultiplier();
+  const _meteorMult = getMeteorSiteBonus(player.x, player.z);
+  const _eventMult  = _rushMult * _meteorMult;
+  if (_eventMult > 1 && digResult.earned) {
+    const bonus = Math.round(digResult.earned * (_eventMult - 1));
+    addMoney(bonus);
+    digResult.earned    += bonus;
+    digResult.eventMult  = _eventMult;
+    digResult.totalMoney = getMoney();
+  }
+  // Void Surge: boost ore roll chance (flag for notif)
+  if (getVoidSurgeActive() && digResult.layer?.name === 'The Void') {
+    digResult.voidSurge = true;
+  }
+
   const itemId    = digResult.ore ? digResult.ore.id   : digResult.layer.name;
   const itemName  = digResult.ore ? digResult.ore.name : digResult.layer.name;
   const collected = playerInventory.addItem(itemId, itemName);
@@ -1256,6 +1324,7 @@ function _performDig() {
   // Layer-transition flourish
   if (digResult.newLayer) {
     _showLayerTransitionBanner(digResult.newLayer);
+    flashLayerColour(digResult.newLayer.hexColor);
   }
 }
 
@@ -1387,6 +1456,72 @@ function _closeTpWheel() {
   document.getElementById('teleportWheel')?.classList.add('hidden');
 }
 
+// ── Part 2: Chest open handler ────────────────────────────────
+async function _handleChestOpen(chest) {
+  const notif = document.createElement('div');
+  notif.style.cssText = ['position:fixed','bottom:140px','left:50%','transform:translateX(-50%)',
+    'background:rgba(0,0,0,0.85)','border-radius:9px','padding:10px 20px',
+    'font-family:inherit','font-size:13px','font-weight:600','color:#fff',
+    'pointer-events:none','z-index:420','opacity:1','transition:opacity 0.5s'].join(';');
+  notif.innerHTML = '📦 Opening ' + chest.tier + ' chest…';
+  document.body.appendChild(notif);
+  let ore = null, bonusCoins = 0, flavour = 'Something shines in the dark.';
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:200,
+        system:'You are a loot generator for a 3D mining game. Return JSON only.',
+        messages:[{ role:'user', content:
+          'Player depth: ' + chest.depth + 'm. Coins: ' + Math.round(getMoney()) +
+          '. Chest tier: ' + chest.tier +
+          '. Return: {"ore_id","ore_count","bonus_coins","flavour_text"}'
+        }] }) });
+    if (res.ok) {
+      const data = await res.json();
+      const parsed = JSON.parse((data.content?.[0]?.text ?? '').replace(/```[\w]*
+?/g,'').trim());
+      ore = parsed.ore_id ? ORES[parsed.ore_id] : null;
+      bonusCoins = parsed.bonus_coins ?? 0;
+      flavour = parsed.flavour_text ?? flavour;
+    }
+  } catch {}
+  if (!ore) {
+    const ids = chest.depth >= 150 ? ['diamond','void_crystal'] :
+                chest.depth >= 80  ? ['ruby','amethyst'] :
+                chest.depth >= 40  ? ['gold','emerald'] : ['coal','copper'];
+    ore = ORES[ids[Math.floor(Math.random()*ids.length)]];
+    bonusCoins = chest.depth * 2;
+  }
+  if (ore) playerInventory.addItem(ore.id, ore.name);
+  if (bonusCoins > 0) addMoney(bonusCoins);
+  _updateMoneyHUD(getMoney());
+  notif.innerHTML = '📦 ' + (ore ? ore.name : 'Empty') + ' · +' + bonusCoins + ' coins<br>' +
+    '<span style="font-size:11px;font-weight:400;color:#aaa">' + flavour + '</span>';
+  setTimeout(() => { notif.style.opacity = '0'; setTimeout(() => notif.remove(), 600); }, 3500);
+}
+
+// ── Part 2: E-key cave interaction ────────────────────────────
+function _handleCaveInteract() {
+  const result = cavesInteract(player.x, player.y, player.z);
+  if (!result) return;
+  if (result.type === 'chest') _handleChestOpen(result.chest);
+  if (result.type === 'cabin') {
+    const popup = document.createElement('div');
+    popup.style.cssText = ['position:fixed','top:50%','left:50%',
+      'transform:translate(-50%,-50%)',
+      'background:rgba(10,8,6,0.92)','border:1px solid #8a7040','border-radius:10px',
+      'padding:16px 24px','font-family:inherit','font-size:13px','color:#e8d4a0',
+      'z-index:450','max-width:320px','text-align:center','pointer-events:auto','cursor:pointer'
+    ].join(';');
+    popup.innerHTML = '<div style="font-size:16px;margin-bottom:8px">📜 Miner's Log</div>' +
+      '<div style="color:#c0a870;line-height:1.6">An old miner made this shelter at ' +
+      Math.round(result.cabin.depth) + 'm.<br>Ore veins nearby — look carefully.</div>' +
+      '<div style="margin-top:12px;font-size:11px;color:#888">[Click to close]</div>';
+    popup.addEventListener('click', () => popup.remove());
+    document.body.appendChild(popup);
+  }
+}
+
 // Track last dig point for "Last Dig" slot
 function recordLastDigPoint(x, z, depth) {
   _tpLastDigX     = x;
@@ -1453,6 +1588,10 @@ function setupChat(name, colour) {
       // Close shop/inventory on E if open
       if (isShopOpen()) { closeShop(); return; }
       if (isInventoryOpen) { closeInventory(); return; }
+
+      // Part 2: Check for cave interactions (chests, cabin signs) first
+      const _caveHit = _handleCaveInteract();
+      if (_caveHit) return;
 
       // Dig on E key too (as fallback)
       _performDig();
