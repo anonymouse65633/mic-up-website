@@ -1747,3 +1747,232 @@
 .ug-teleport-btn:active {
   transform: scale(0.97);
 }
+
+/* ══════════════════════════════════════════════════════════
+   PART 4 — DISCOVERY FX & ORE VISUAL POLISH
+   ══════════════════════════════════════════════════════════ */
+
+/* ── Rarity badge (below crosshair on ore find) ─────────── */
+#rarityBadge {
+  /* Base styles set inline by JS; these are defaults / overrides */
+  font-family: var(--font-pixel, 'Press Start 2P', monospace);
+  text-transform: uppercase;
+  white-space: nowrap;
+  animation: rarityFadeIn 0.14s ease;
+}
+
+@keyframes rarityFadeIn {
+  from { opacity: 0; transform: translateX(-50%) scale(0.88); }
+  to   { opacity: 1; transform: translateX(-50%) scale(1);    }
+}
+
+/* ── White flash (placed inline, keyframes for safety) ─── */
+#ww-white-flash {
+  pointer-events: none;
+}
+
+/* ── Coloured vignette (placed inline) ───────────────────── */
+#ww-vignette {
+  pointer-events: none;
+}
+
+/* ── Cinematic bars ──────────────────────────────────────── */
+#ww-cinema-top,
+#ww-cinema-bot {
+  pointer-events: none;
+}
+
+/* ── Progress ring crosshair (already in HTML, polish here) */
+#progressRingCanvas {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 95;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+/* ── Dig notification rarity tiers ──────────────────────── */
+.dig-notif.ore-found.rarity-uncommon { border-left-color: #FFCC00; }
+.dig-notif.ore-found.rarity-rare     { border-left-color: #FF2244; }
+.dig-notif.ore-found.rarity-epic     { border-left-color: #88EEFF; box-shadow: 0 0 16px rgba(136,238,255,0.4); }
+.dig-notif.ore-found.rarity-legendary{ border-left-color: #CC00FF; box-shadow: 0 0 22px rgba(200,0,255,0.55); }
+.dig-notif.ore-found.rarity-mythic   { border-left-color: #FFD700; box-shadow: 0 0 28px rgba(255,215,0,0.7);  }
+
+/* Subtle pulse animation for epic+ badges */
+.dig-notif.ore-found.rarity-epic,
+.dig-notif.ore-found.rarity-legendary,
+.dig-notif.ore-found.rarity-mythic {
+  animation: notifPulse 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes notifPulse {
+  from { box-shadow: 0 0 12px rgba(255,255,255,0.1); }
+  to   { box-shadow: 0 0 26px rgba(255,255,255,0.28); }
+}
+
+/* ── Punch resistance pip bar ────────────────────────────── */
+/* Uses the existing progress ring canvas; below is for
+   the partial-hit notification text colour variants */
+.dig-notif .dn-punch-pips {
+  font-family: var(--font-mono, 'Courier New', monospace);
+  letter-spacing: 2px;
+  font-size: 11px;
+  color: #aaa;
+}
+
+/* ══════════════════════════════════════════════════════════
+   PART 5 — AI CONTENT UI
+   ══════════════════════════════════════════════════════════ */
+
+/* ── Shop tab bar ────────────────────────────────────────── */
+.shop-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  background: rgba(0,0,0,0.2);
+  flex-shrink: 0;
+}
+
+.shop-tab {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: rgba(255,255,255,0.5);
+  font-family: var(--font-pixel, monospace);
+  font-size: 10px;
+  padding: 10px 6px 8px;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  transition: all 0.15s;
+  text-transform: uppercase;
+}
+
+.shop-tab:hover {
+  color: rgba(255,255,255,0.8);
+  background: rgba(255,255,255,0.04);
+}
+
+.shop-tab.active {
+  color: var(--c-accent, #00f5c4);
+  border-bottom-color: var(--c-accent, #00f5c4);
+  background: rgba(0,245,196,0.04);
+}
+
+/* ── Daily Deals panel ───────────────────────────────────── */
+.shop-daily-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
+.shop-daily-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px 6px;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+  flex-shrink: 0;
+}
+
+.shop-daily-title {
+  font-family: var(--font-pixel, monospace);
+  font-size: 11px;
+  color: #ffd700;
+  letter-spacing: 0.05em;
+}
+
+.shop-daily-timer {
+  font-size: 10px;
+  color: rgba(255,255,255,0.4);
+  font-family: var(--font-mono, monospace);
+}
+
+/* ── Daily item card extras ──────────────────────────────── */
+.shop-item-card.daily-card {
+  border-top: 2px solid rgba(255,255,255,0.2); /* overridden per-card by JS */
+  position: relative;
+}
+
+.daily-type-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.08em;
+}
+
+.daily-timer {
+  font-size: 10px;
+  color: rgba(255,200,100,0.8);
+  text-align: center;
+  margin-top: 2px;
+}
+
+.daily-bundle-items {
+  font-size: 10px;
+  color: rgba(255,255,255,0.5);
+  text-align: center;
+  padding: 2px 4px;
+  line-height: 1.5;
+}
+
+.daily-bundle-items span {
+  background: rgba(255,255,255,0.07);
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin: 1px;
+  display: inline-block;
+}
+
+/* ── Daily loading spinner ───────────────────────────────── */
+.shop-daily-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 30px 0;
+  color: rgba(255,255,255,0.4);
+  font-size: 12px;
+}
+
+.shop-daily-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(255,255,255,0.15);
+  border-top-color: var(--c-accent, #00f5c4);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── AI ore description line in dig notif ────────────────── */
+.dn-ai-desc {
+  font-size: 10px;
+  color: #bbb;
+  font-style: italic;
+  margin-top: 2px;
+  animation: fadeInSlide 0.3s ease;
+}
+
+@keyframes fadeInSlide {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Chest open notif upgrade ────────────────────────────── */
+/* Chest notif is inline-styled; this covers the item colour spans */
+.chest-ore-label {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
