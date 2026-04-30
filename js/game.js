@@ -60,6 +60,17 @@ import {
 // ── Part 5: AI Content ───────────────────────────────────────
 import { getChestLoot, getCabinLore, getOreDesc, getDailyChallenges, getDepositHint } from './aiContent.js';
 
+// ── Part 7: UI Systems ───────────────────────────────────────
+import {
+  updateMoneyHUD, updateDepthHUD, showOreToast,
+  resetInactivityTimer, tickInactivity,
+  reviveChatFade, getChatMsgClass,
+  drawDepthStrip, getMinimapMode, toggleMinimapMode,
+  updatePrestigeAura, tickPrestigeAuras, syncAuraToPlayer,
+  getSeasonalGrassColor, getSeasonName,
+  checkSaveProgressPrompt,
+} from './ui.js';
+
 // ── Part 6: Prestige & Rare Items ────────────────────────────
 import {
   initPrestige, addLifetimeCoins, addPrestigeXP, grantRareItem, hasRareItem,
@@ -405,6 +416,7 @@ async function init() {
   buildMapWorldCanvas();
   setupMap();
   initAvatarPreview();
+  _setupPart7(name);
 
   setLoad(100, 'Ready!');
   await delay(300);
@@ -480,6 +492,10 @@ function gameLoop(timestamp) {
   tickCaves(player.x, player.y, player.z, dt);
   tickEvents(timestamp);
   tickRareItems(player.x, player.y, player.z, dt);  // Part 6
+
+  // Part 7: prestige auras + inactivity
+  tickPrestigeAuras(dt);
+  tickInactivity(_onInactiveKick);
 
   renderer.draw(player, remotePlayers, timestamp);
 
@@ -634,35 +650,12 @@ function updateHUD() {
     if (_cd > 0.5) _onDepthForChallenges(_cd);
   }
 
-  // Money display
-  const moneyEl = document.getElementById('hudMoney');
-  if (moneyEl) moneyEl.textContent = '$' + getMoney().toLocaleString();
+  // Money display (Part 7: animated, done via callback only — skip per-frame update)
 
-  // Depth display
+  // Depth display (Part 7: styled depth pill)
   const depth = getDepthAt(player.x, player.z);
-  const depthEl = document.getElementById('hudDepth');
-  const depthPanel = document.getElementById('hudDepthPanel');
-  const zone = getZoneName(player.x, player.z);
-  if (depthEl && depthPanel) {
-    if (zone === 'Plaza') {
-      // Show the "no digging" indicator only if you're actually standing in the Plaza
-      depthEl.innerHTML = '🏛 Plaza — <span style="color:#ff9944">No Digging</span>';
-      depthEl.style.color = '#cccccc';
-      depthEl.style.display = '';
-      depthPanel.style.display = '';
-    } else if (depth > 0.3) {
-      const mat = getMaterialAtDepth(depth);
-      depthEl.textContent = '⛏ ' + depth.toFixed(1) + 'm — ' + mat.name;
-      depthEl.style.color = mat.hexColor;
-      depthEl.style.display = '';
-      depthPanel.style.display = '';
-      // Part 5: expose current layer for deposit hint
-      window._currentLayerName = mat.name;
-    } else {
-      depthEl.style.display = 'none';
-      depthPanel.style.display = 'none';
-    }
-  }
+  const zone  = getZoneName(player.x, player.z);
+  updateDepthHUD(depth, zone);
 }
 
 // ============================================================
@@ -881,6 +874,12 @@ function updateMinimap() {
   // Zone label
   const zoneLabel = document.getElementById('minimapZoneLabel');
   if (zoneLabel) zoneLabel.textContent = getZoneName(player.x, player.z);
+
+  // Part 7: depth strip on right edge when in depth mode
+  if (getMinimapMode() === 'depth') {
+    const pd = getDepthAt(player.x, player.z);
+    drawDepthStrip(minimapCtx, W, H, pd > 0 ? pd : 0);
+  }
 }
 
 
@@ -1272,8 +1271,7 @@ function _updateShopProximity(px, pz) {
 }
 
 function _updateMoneyHUD(money) {
-  const el = document.getElementById('hudMoney');
-  if (el) el.textContent = `$${money.toLocaleString()}`;
+  updateMoneyHUD(money);
 }
 
 function setupMap() {
@@ -1435,7 +1433,7 @@ function _performDig() {
     if (isGrandMotherlode && minedCount === 6) {
       // Exactly 6 = announce once to server chat
       const msg = `🏆 ${sessionStorage.getItem('playerName') || 'A miner'} found a ${ore.name} motherlode at ${Math.round(digResult.depth)}m!`;
-      sendChat(msg).catch(() => {});
+      sendChat({ name: '', colour: ore.hexColor || '#ffd700', text: msg, type: 'ore' }).catch(() => {});
       _showMotherloadeBanner(ore, true);
     } else if (isMotherlode && minedCount === 4) {
       // Hit 4 cells — local popup only
@@ -2044,7 +2042,7 @@ function renderChat(messages) {
 
   messages.forEach(m => {
     const div = document.createElement('div');
-    div.className = 'chat-msg' + (m.system ? ' sys-msg' : '');
+    div.className = getChatMsgClass(m);
 
     if (m.name && !m.system) {
       const nameSpan = document.createElement('span');
@@ -2070,6 +2068,7 @@ function renderChat(messages) {
   });
 
   chatMessages.scrollTop = chatMessages.scrollHeight;
+  reviveChatFade(); // Part 7: reset fade timer on new messages
 }
 
 // ============================================================
@@ -2417,6 +2416,9 @@ function _tickAvatarPreview() {
 function _triggerDiscoveryEvent(ore, depth) {
   const rarity = ore.rarity;
 
+  // Part 7: show ore toast for all ore finds
+  showOreToast(ore, depth);
+
   // common / uncommon — just a badge, no drama
   if (rarity === 'common' || rarity === 'uncommon') {
     _showRarityBadge(ore, 2000);
@@ -2442,7 +2444,7 @@ function _triggerDiscoveryEvent(ore, depth) {
     setTimeout(() => { _timeScaleMult = 1.0; }, 400);
     // Server-wide chat
     const name = sessionStorage.getItem('playerName') || 'A miner';
-    sendChat(`💎 ${name} found ${ore.name} at ${Math.round(depth)}m!`).catch(() => {});
+    sendChat({ name: '', colour: ore.hexColor, text: `💎 ${name} found ${ore.name} at ${Math.round(depth)}m!`, type: 'ore' }).catch(() => {});
 
   } else if (rarity === 'legendary' || rarity === 'mythic') {
     _showRarityBadge(ore, 0);      // stays until timer expires internally
@@ -2455,7 +2457,7 @@ function _triggerDiscoveryEvent(ore, depth) {
     // Server-wide chat
     const name  = sessionStorage.getItem('playerName') || 'A miner';
     const emoji = rarity === 'mythic' ? '☀️' : '🔮';
-    sendChat(`${emoji} ${name} discovered ${ore.name} at ${Math.round(depth)}m! Legendary find!`).catch(() => {});
+    sendChat({ name: '', colour: '#cc66ff', text: `${emoji} ${name} discovered ${ore.name} at ${Math.round(depth)}m! Legendary find!`, type: 'legendary' }).catch(() => {});
   }
 }
 
@@ -2810,7 +2812,7 @@ function _doPrestige() {
   // Announce to chat
   const name = sessionStorage.getItem('playerName') || 'A miner';
   const msg  = `⭐ ${name} prestiged to P${state.level}! (×${state.multiplier.toFixed(1)} coins)`;
-  sendChat(msg).catch(() => {});
+  sendChat({ name: '', colour: '#ffd700', text: msg, type: 'legendary' }).catch(() => {});
 }
 
 // Wire prestige button click
@@ -2834,6 +2836,60 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('prestigeCeremony')?.classList.add('hidden');
   });
 });
+
+// ============================================================
+//  PART 7 — UI Setup
+// ============================================================
+
+function _onInactiveKick() {
+  const name = sessionStorage.getItem('playerName') || 'Player';
+  leaveGame(name).catch(() => {});
+  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+  document.getElementById('inactiveKickScreen')?.classList.remove('hidden');
+  document.getElementById('gameWrapper')?.classList.add('hidden');
+}
+
+function _setupPart7(name) {
+  // Minimap depth view toggle
+  document.getElementById('minimapModeBtn')?.addEventListener('click', () => {
+    toggleMinimapMode();
+  });
+
+  // Inactivity reset on any input
+  const _resetIdle = () => resetInactivityTimer();
+  document.addEventListener('keydown',    _resetIdle, { passive: true });
+  document.addEventListener('mousemove',  _resetIdle, { passive: true });
+  document.addEventListener('mousedown',  _resetIdle, { passive: true });
+  document.addEventListener('touchstart', _resetIdle, { passive: true });
+
+  // Save progress banner — show after 10 min for guests
+  const isGuest = sessionStorage.getItem('playerGuest') === 'true';
+  if (isGuest) {
+    setTimeout(() => checkSaveProgressPrompt(), 10 * 60 * 1000);
+  }
+
+  // Apply seasonal grass tint to world
+  const seasonColor = getSeasonalGrassColor();
+  window._seasonalGrassColor = seasonColor;
+  // Announce season in chat after a short delay
+  setTimeout(() => {
+    const season = getSeasonName();
+    const chatEl = document.getElementById('chatMessages');
+    if (chatEl) {
+      const div = document.createElement('div');
+      div.className = 'chat-msg sys-msg';
+      div.innerHTML = `<span class="msg-text">🌍 Season: ${season}</span>`;
+      chatEl.appendChild(div);
+      chatEl.scrollTop = chatEl.scrollHeight;
+    }
+  }, 3000);
+}
+
+// ============================================================
+//  PART 7 — Minimap with depth strip
+// ============================================================
+// Hook into existing updateMinimap to add depth strip when in depth mode
+const _origUpdateMinimap = updateMinimap ?? null;
 
 // ============================================================
 //  START
