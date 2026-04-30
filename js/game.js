@@ -30,7 +30,8 @@ import {
   onChat,
 } from './network.js';
 import { onDig, getMoney, addMoney, getDepthAt, getMaterialAtDepth, ORES, rollOre, resetMining, generateOreDeposits, generateOreVeins,
-         initMining, tickParticles, tickCameraShake, triggerShake } from './mining.js';
+         initMining, tickParticles, tickCameraShake, triggerShake,
+         tickOreCrystals } from './mining.js';
 import { playerInventory, TOOLS } from './inventory.js';
 import { openShop, closeShop, isShopOpen, getNearestShop, setMoneyChangeCallback, SHOPS } from './shop.js';
 import {
@@ -55,6 +56,9 @@ import {
   getOreRushMultiplier, getVoidSurgeActive, getMeteorSiteBonus,
   getActiveEventSummary, getMeteorMinimapMarker,
 } from './events.js';
+
+// ── Part 5: AI Content ───────────────────────────────────────
+import { getChestLoot, getCabinLore, getOreDesc } from './aiContent.js';
 
 // ============================================================
 //  SETTINGS
@@ -163,6 +167,10 @@ const POS_INTERVAL = 100; // ms between Firebase position writes (~10 Hz)
 // ── Mining state ─────────────────────────────────────────────
 let _lastDigTime = 0;
 const BASE_DIG_COOLDOWN = 550; // ms at digSpeed 1.0
+
+// ── Part 4: Discovery event system ───────────────────────────
+let _discoveryLock  = false;   // prevent stacking dramatic events
+let _timeScaleMult  = 1.0;     // applied to dt for slowdown effects
 let _digNotifTimer = null;
 let _nearestShop   = null;
 let _punchProgress = 0;  // 0..1 — drives progress ring on crosshair
@@ -414,7 +422,8 @@ async function init() {
 // ============================================================
 function gameLoop(timestamp) {
   // Cap dt at 100 ms so a frozen tab doesn't cause a physics explosion
-  const dt = Math.min((timestamp - lastTime) / 1000, 0.1);
+  const rawDt = Math.min((timestamp - lastTime) / 1000, 0.1);
+  const dt     = rawDt * _timeScaleMult;   // Part 4: discovery slowdown
   lastTime  = timestamp;
 
   // Only update player physics when gameplay is active
@@ -443,6 +452,7 @@ function gameLoop(timestamp) {
   // Physics ticks for dig effects
   tickParticles(dt);
   tickCameraShake(camera, dt);
+  tickOreCrystals(camera, dt);   // Part 4: LOD + animate ore crystal clusters
 
   // Part 2 ticks
   const _playerDepth = getDepthAt(player.x, player.z);
@@ -592,6 +602,9 @@ function updateHUD() {
 
   hudPos.textContent  = `${player.x.toFixed(1)}, ${player.z.toFixed(1)}`;
   if (hudZone) hudZone.textContent = getZoneName(player.x, player.z);
+
+  // Expose depth for daily shop AI call
+  window._playerDepthForShop = getDepthAt(player.x, player.z);
 
   // Money display
   const moneyEl = document.getElementById('hudMoney');
@@ -1370,6 +1383,9 @@ function _performDig() {
       _showMotherloadeBanner(ore, false);
     }
   }
+
+  // ── Part 4: Discovery event system ──────────────────────
+  if (digResult.ore) _triggerDiscoveryEvent(digResult.ore, digResult.depth);
 }
 
 // ============================================================
@@ -1500,48 +1516,52 @@ function _closeTpWheel() {
   document.getElementById('teleportWheel')?.classList.add('hidden');
 }
 
-// ── Part 2: Chest open handler ────────────────────────────────
+// ── Part 5: Chest open handler (AI-powered via aiContent.js) ─
 async function _handleChestOpen(chest) {
   const notif = document.createElement('div');
-  notif.style.cssText = ['position:fixed','bottom:140px','left:50%','transform:translateX(-50%)',
-    'background:rgba(0,0,0,0.85)','border-radius:9px','padding:10px 20px',
+  notif.style.cssText = [
+    'position:fixed','bottom:140px','left:50%','transform:translateX(-50%)',
+    'background:rgba(0,0,0,0.88)','border-radius:10px','padding:12px 22px',
     'font-family:inherit','font-size:13px','font-weight:600','color:#fff',
-    'pointer-events:none','z-index:420','opacity:1','transition:opacity 0.5s'].join(';');
-  notif.innerHTML = '📦 Opening ' + chest.tier + ' chest…';
+    'pointer-events:none','z-index:420','opacity:1','transition:opacity 0.5s',
+    'display:flex','flex-direction:column','align-items:center','gap:4px',
+    'border:1px solid rgba(255,255,255,0.12)',
+  ].join(';');
+  notif.innerHTML = '<span style="font-size:18px">📦</span> Opening ' + chest.tier + ' chest…';
   document.body.appendChild(notif);
-  let ore = null, bonusCoins = 0, flavour = 'Something shines in the dark.';
-  try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ model:'claude-sonnet-4-20250514', max_tokens:200,
-        system:'You are a loot generator for a 3D mining game. Return JSON only.',
-        messages:[{ role:'user', content:
-          'Player depth: ' + chest.depth + 'm. Coins: ' + Math.round(getMoney()) +
-          '. Chest tier: ' + chest.tier +
-          '. Return: {"ore_id","ore_count","bonus_coins","flavour_text"}'
-        }] }) });
-    if (res.ok) {
-      const data = await res.json();
-      const parsed = JSON.parse((data.content?.[0]?.text ?? '').replace(/```[\w]*
-?/g,'').trim());
-      ore = parsed.ore_id ? ORES[parsed.ore_id] : null;
-      bonusCoins = parsed.bonus_coins ?? 0;
-      flavour = parsed.flavour_text ?? flavour;
-    }
-  } catch {}
-  if (!ore) {
-    const ids = chest.depth >= 150 ? ['diamond','void_crystal'] :
-                chest.depth >= 80  ? ['ruby','amethyst'] :
-                chest.depth >= 40  ? ['gold','emerald'] : ['coal','copper'];
-    ore = ORES[ids[Math.floor(Math.random()*ids.length)]];
-    bonusCoins = chest.depth * 2;
+
+  // ── AI loot determination via Part 5 module ──────────────
+  const prestige = window._playerPrestige ?? 0;
+  const loot = await getChestLoot(chest.depth, getMoney(), prestige, chest.tier);
+
+  const ore        = ORES[loot.ore_id] ?? null;
+  const bonusCoins = Math.max(0, loot.bonus_coins ?? 0);
+  const flavour    = loot.flavour_text ?? 'Something shines in the dark.';
+  const oreCount   = Math.max(1, Math.min(4, loot.ore_count ?? 1));
+
+  // ── Apply loot ────────────────────────────────────────────
+  if (ore) {
+    for (let i = 0; i < oreCount; i++) playerInventory.addItem(ore.id, ore.name);
   }
-  if (ore) playerInventory.addItem(ore.id, ore.name);
   if (bonusCoins > 0) addMoney(bonusCoins);
   _updateMoneyHUD(getMoney());
-  notif.innerHTML = '📦 ' + (ore ? ore.name : 'Empty') + ' · +' + bonusCoins + ' coins<br>' +
-    '<span style="font-size:11px;font-weight:400;color:#aaa">' + flavour + '</span>';
-  setTimeout(() => { notif.style.opacity = '0'; setTimeout(() => notif.remove(), 600); }, 3500);
+  window.dispatchEvent(new CustomEvent('inventory-changed'));
+
+  // ── Show result ───────────────────────────────────────────
+  const oreLabel = ore
+    ? `<span style="color:${ore.hexColor}">${ore.emoji} ${ore.name}${oreCount > 1 ? ' ×' + oreCount : ''}</span>`
+    : '<span style="color:#aaa">Empty</span>';
+
+  notif.innerHTML =
+    `<div style="font-size:16px">📦 Chest Opened!</div>` +
+    `<div>${oreLabel}${bonusCoins > 0 ? ` · <span style="color:#ffd700">+$${bonusCoins}</span>` : ''}</div>` +
+    `<div style="font-size:11px;font-weight:400;color:#aaa;max-width:220px;text-align:center">${flavour}</div>`;
+
+  setTimeout(() => {
+    notif.style.opacity = '0';
+    setTimeout(() => notif.remove(), 600);
+  }, 4000);
+
 }
 
 // ── Part 2: E-key cave interaction ────────────────────────────
@@ -1550,19 +1570,26 @@ function _handleCaveInteract() {
   if (!result) return;
   if (result.type === 'chest') _handleChestOpen(result.chest);
   if (result.type === 'cabin') {
+    const cabin = result.cabin;
     const popup = document.createElement('div');
-    popup.style.cssText = ['position:fixed','top:50%','left:50%',
-      'transform:translate(-50%,-50%)',
-      'background:rgba(10,8,6,0.92)','border:1px solid #8a7040','border-radius:10px',
-      'padding:16px 24px','font-family:inherit','font-size:13px','color:#e8d4a0',
-      'z-index:450','max-width:320px','text-align:center','pointer-events:auto','cursor:pointer'
+    popup.style.cssText = [
+      'position:fixed','top:50%','left:50%','transform:translate(-50%,-50%)',
+      'background:rgba(10,8,6,0.93)','border:1px solid #8a7040','border-radius:10px',
+      'padding:18px 26px','font-family:inherit','font-size:13px','color:#e8d4a0',
+      'z-index:450','max-width:340px','text-align:center','pointer-events:auto','cursor:pointer',
+      'box-shadow:0 0 30px rgba(0,0,0,0.7)',
     ].join(';');
-    popup.innerHTML = '<div style="font-size:16px;margin-bottom:8px">📜 Miner's Log</div>' +
-      '<div style="color:#c0a870;line-height:1.6">An old miner made this shelter at ' +
-      Math.round(result.cabin.depth) + 'm.<br>Ore veins nearby — look carefully.</div>' +
-      '<div style="margin-top:12px;font-size:11px;color:#888">[Click to close]</div>';
+    popup.innerHTML =
+      '<div style="font-size:18px;margin-bottom:10px">📜 Miner's Log</div>' +
+      '<div style="color:#c0a870;line-height:1.7;min-height:42px;font-style:italic">Loading…</div>' +
+      '<div style="margin-top:14px;font-size:11px;color:#666">[Click to close]</div>';
     popup.addEventListener('click', () => popup.remove());
     document.body.appendChild(popup);
+    const cabinKey = Math.round(cabin.cx) + '_' + Math.round(cabin.cz);
+    getCabinLore(cabinKey, cabin.depth ?? 30).then(lore => {
+      const textEl = popup.querySelectorAll('div')[1];
+      if (textEl && popup.isConnected) { textEl.textContent = lore; textEl.style.fontStyle = 'normal'; }
+    }).catch(() => {});
   }
 }
 
@@ -2049,6 +2076,165 @@ function _tickAvatarPreview() {
 }
 
 // ============================================================
+//  PART 4 — DISCOVERY EVENT SYSTEM
+//
+//  Tiered reactions keyed to ore rarity:
+//
+//  common / uncommon → HUD rarity badge for 2 s, no camera change
+//  rare              → FOV tween 75→62→75 over 800 ms + badge
+//  epic              → 0.4 s time-scale 0.25 + zoom + vignette
+//                      + white flash + server chat broadcast
+//  legendary / mythic→ 1 s freeze + cinematic bars + white flash
+//                      + server-wide chat
+// ============================================================
+
+function _triggerDiscoveryEvent(ore, depth) {
+  const rarity = ore.rarity;
+
+  // common / uncommon — just a badge, no drama
+  if (rarity === 'common' || rarity === 'uncommon') {
+    _showRarityBadge(ore, 2000);
+    return;
+  }
+
+  // Prevent stacking dramatic events
+  if (_discoveryLock) return;
+  _discoveryLock = true;
+  setTimeout(() => { _discoveryLock = false; }, 4000);
+
+  if (rarity === 'rare') {
+    _showRarityBadge(ore, 3000);
+    _tweenFOV(75, 62, 300, () => setTimeout(() => _tweenFOV(62, 75, 500, null), 500));
+
+  } else if (rarity === 'epic') {
+    _showRarityBadge(ore, 4000);
+    _showVignette(ore.hexColor, 1200);
+    _showWhiteFlash(90);
+    _tweenFOV(75, 60, 250, () => setTimeout(() => _tweenFOV(60, 75, 500, null), 400));
+    // Time-scale slowdown for 0.4 s
+    _timeScaleMult = 0.25;
+    setTimeout(() => { _timeScaleMult = 1.0; }, 400);
+    // Server-wide chat
+    const name = sessionStorage.getItem('playerName') || 'A miner';
+    sendChat(`💎 ${name} found ${ore.name} at ${Math.round(depth)}m!`).catch(() => {});
+
+  } else if (rarity === 'legendary' || rarity === 'mythic') {
+    _showRarityBadge(ore, 0);      // stays until timer expires internally
+    _showCinematicBars(2200);
+    _showWhiteFlash(220);
+    _tweenFOV(75, 55, 200, () => setTimeout(() => _tweenFOV(55, 75, 700, null), 900));
+    // 1 s freeze
+    _timeScaleMult = 0;
+    setTimeout(() => { _timeScaleMult = 1.0; }, 1000);
+    // Server-wide chat
+    const name  = sessionStorage.getItem('playerName') || 'A miner';
+    const emoji = rarity === 'mythic' ? '☀️' : '🔮';
+    sendChat(`${emoji} ${name} discovered ${ore.name} at ${Math.round(depth)}m! Legendary find!`).catch(() => {});
+  }
+}
+
+/** Coloured rarity badge below crosshair. dur=0 → permanent (auto-fades after 5 s). */
+function _showRarityBadge(ore, dur) {
+  let el = document.getElementById('rarityBadge');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'rarityBadge';
+    (document.getElementById('gameWrapper') || document.body).appendChild(el);
+  }
+  clearTimeout(el._timer);
+  el.style.cssText = [
+    'position:fixed','bottom:54%','left:50%','transform:translateX(-50%)',
+    `padding:5px 16px 5px 12px`,`border-radius:6px`,
+    `background:${ore.hexColor}22`,`border:1px solid ${ore.hexColor}88`,
+    `color:${ore.hexColor}`,`font-family:var(--font-pixel,monospace)`,
+    `font-size:13px`,`font-weight:600`,`letter-spacing:.06em`,
+    `pointer-events:none`,`z-index:9000`,
+    `display:flex`,`align-items:center`,`gap:8px`,
+    `opacity:1`,`transition:opacity .4s`,
+    `box-shadow:0 0 14px ${ore.hexColor}44`,
+  ].join(';');
+  el.innerHTML =
+    `<span style="font-size:17px">${ore.emoji}</span>` +
+    `${ore.name.toUpperCase()}&nbsp;` +
+    `<span style="font-size:11px;opacity:.7">+$${ore.value}</span>`;
+  const fadeDur = dur > 0 ? dur : 5000;
+  el._timer = setTimeout(() => {
+    el.style.opacity = '0';
+    setTimeout(() => { el.style.opacity = ''; el.style.transition = ''; }, 420);
+  }, fadeDur);
+}
+
+/** White flash overlay. */
+function _showWhiteFlash(durationMs) {
+  let el = document.getElementById('ww-white-flash');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'ww-white-flash';
+    el.style.cssText = 'position:fixed;inset:0;background:#fff;pointer-events:none;z-index:9100;opacity:0;';
+    (document.getElementById('gameWrapper') || document.body).appendChild(el);
+  }
+  el.style.transition = 'none';
+  el.style.opacity    = '0.92';
+  requestAnimationFrame(() => {
+    el.style.transition = `opacity ${durationMs}ms ease`;
+    el.style.opacity    = '0';
+  });
+}
+
+/** Coloured edge vignette. */
+function _showVignette(hexColor, durationMs) {
+  let el = document.getElementById('ww-vignette');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'ww-vignette';
+    el.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:9050;opacity:0;';
+    (document.getElementById('gameWrapper') || document.body).appendChild(el);
+  }
+  el.style.background = `radial-gradient(ellipse at center, transparent 38%, ${hexColor}66 100%)`;
+  el.style.transition = 'none';
+  el.style.opacity    = '1';
+  setTimeout(() => {
+    el.style.transition = `opacity ${durationMs}ms ease`;
+    el.style.opacity    = '0';
+  }, 50);
+}
+
+/** Top + bottom cinematic bars slide in then out. */
+function _showCinematicBars(holdMs) {
+  ['ww-cinema-top', 'ww-cinema-bot'].forEach((id, i) => {
+    let el = document.getElementById(id);
+    if (!el) {
+      el = document.createElement('div');
+      el.id = id;
+      (document.getElementById('gameWrapper') || document.body).appendChild(el);
+    }
+    el.style.cssText = [
+      'position:fixed','left:0','right:0','height:11vh',
+      'background:#000','pointer-events:none','z-index:9080',
+      'transition:transform .22s ease',
+      i === 0 ? 'top:0;transform:translateY(-100%);' : 'bottom:0;transform:translateY(100%);',
+    ].join(';');
+    requestAnimationFrame(() => { el.style.transform = 'translateY(0)'; });
+    setTimeout(() => {
+      el.style.transform = i === 0 ? 'translateY(-100%)' : 'translateY(100%)';
+    }, holdMs);
+  });
+}
+
+/** Smooth FOV tween on the Three.js camera. */
+function _tweenFOV(from, to, ms, cb) {
+  if (!camera) return;
+  const start = performance.now();
+  const step  = now => {
+    const t = Math.min(1, (now - start) / ms);
+    camera.fov = from + (to - from) * t;
+    camera.updateProjectionMatrix();
+    if (t < 1) requestAnimationFrame(step); else cb?.();
+  };
+  requestAnimationFrame(step);
+}
+
+// ============================================================
 //  DIG NOTIFICATION
 // ============================================================
 function _showDigNotif(result) {
@@ -2109,8 +2295,18 @@ function _showDigNotif(result) {
       '<span class="dn-label" style="color:' + ore.hexColor + '">' + ore.label + '</span>' +
       depositTag + bagTag + brokeTag +
       '<span class="dn-earned">+$' + earned + '</span>' +
-      '<span class="dn-depth">' + depth.toFixed(1) + 'm · ' + layer.name + '</span>';
+      '<span class="dn-depth">' + depth.toFixed(1) + 'm · ' + layer.name + '</span>' +
+      '<span class="dn-ai-desc" id="dnAiDesc_' + ore.id + '" style="display:none;font-size:10px;color:#bbb;font-style:italic;margin-top:2px"></span>';
     el.className = 'dig-notif visible ore-found ' + rarityClass + (isDeposit ? ' deposit-hit' : '');
+
+    // Part 5: async AI ore description (fills in when ready, cached so 2nd+ finds are instant)
+    getOreDesc(ore.id, ore.rarity).then(desc => {
+      const descEl = document.getElementById('dnAiDesc_' + ore.id);
+      if (descEl && el.classList.contains('visible')) {
+        descEl.textContent = desc;
+        descEl.style.display = '';
+      }
+    }).catch(() => {});
   } else {
     el.innerHTML =
       '<span class="dn-emoji">' + layer.emoji + '</span>' +
