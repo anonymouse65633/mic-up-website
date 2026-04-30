@@ -2239,3 +2239,206 @@
   letter-spacing: 0.02em;
   font-style: italic;
 }
+
+/* ══════════════════════════════════════════════════════════════
+   PART 6 — PRESTIGE & RARE ITEMS
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── Prestige Badge ───────────────────────────────────────────── */
+.prestige-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 8px;
+  line-height: 16px;
+  min-width: 18px;
+  text-align: center;
+}
+.prestige-badge:empty { display: none; }
+.prestige-badge.p1 { background: #cd7f32; color: #fff; }
+.prestige-badge.p2 { background: #c0c0c0; color: #111; }
+.prestige-badge.p3 { background: linear-gradient(135deg,#ffd700,#ff8c00); color: #111; animation: prestige-pulse 2s ease-in-out infinite; }
+.prestige-badge.p5plus {
+  background: linear-gradient(90deg,#ff6ec7,#a78bfa,#38bdf8,#34d399,#fbbf24);
+  background-size: 200% 100%;
+  color: #fff;
+  animation: prestige-rainbow 2s linear infinite, prestige-pulse 2s ease-in-out infinite;
+}
+@keyframes prestige-pulse { 0%,100%{box-shadow:0 0 4px rgba(255,215,0,0.4)} 50%{box-shadow:0 0 10px rgba(255,215,0,0.9)} }
+@keyframes prestige-rainbow { 0%{background-position:0% 50%} 100%{background-position:200% 50%} }
+
+/* ── Prestige Button ──────────────────────────────────────────── */
+#btnPrestige.prestige-ready {
+  animation: prestige-glow 1.2s ease-in-out infinite;
+  background: rgba(255, 215, 0, 0.2);
+  border-color: #ffd700;
+}
+@keyframes prestige-glow { 0%,100%{box-shadow:0 0 6px rgba(255,215,0,0.3)} 50%{box-shadow:0 0 16px rgba(255,215,0,0.8)} }
+
+/* ── Rare Item Toasts ─────────────────────────────────────────── */
+.rare-toast-container {
+  position: fixed;
+  bottom: 130px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 500;
+  pointer-events: none;
+}
+.rare-toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(8, 12, 24, 0.92);
+  border: 1.5px solid #88eeff;
+  border-radius: 10px;
+  padding: 10px 14px;
+  min-width: 220px;
+  opacity: 0;
+  transform: translateX(30px);
+  transition: opacity 0.3s, transform 0.3s;
+  backdrop-filter: blur(8px);
+}
+.rare-toast.visible { opacity: 1; transform: translateX(0); }
+.rt-emoji { font-size: 22px; }
+.rt-title { font-size: 13px; font-weight: 700; }
+.rt-desc  { font-size: 11px; color: rgba(255,255,255,0.55); margin-top: 2px; }
+
+/* ── Prestige Overlay ─────────────────────────────────────────── */
+.prestige-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.75);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 600;
+  backdrop-filter: blur(4px);
+}
+.prestige-overlay.hidden { display: none; }
+.prestige-panel {
+  background: rgba(12, 16, 32, 0.97);
+  border: 1px solid rgba(255, 215, 0, 0.3);
+  border-radius: 14px;
+  padding: 24px;
+  width: 420px;
+  max-width: 95vw;
+  max-height: 85vh;
+  overflow-y: auto;
+  color: #fff;
+}
+.prestige-panel-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 18px;
+}
+.ps-title { font-size: 18px; font-weight: 700; color: #ffd700; }
+.ps-close-btn {
+  background: none; border: 1px solid rgba(255,255,255,0.2);
+  color: rgba(255,255,255,0.6); border-radius: 50%; width: 28px; height: 28px;
+  cursor: pointer; font-size: 14px; line-height: 1;
+}
+.ps-close-btn:hover { color: #fff; border-color: #fff; }
+
+.ps-stats-row { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin-bottom: 14px; }
+.ps-stat-card {
+  background: rgba(255,255,255,0.05);
+  border-radius: 8px; padding: 12px 8px; text-align: center;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.ps-stat-val { font-size: 22px; font-weight: 700; color: #ffd700; }
+.ps-stat-lbl { font-size: 10px; color: rgba(255,255,255,0.45); margin-top: 3px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+.ps-xp-tier {
+  text-align: center; font-size: 13px; font-weight: 600;
+  color: #c0c0c0; margin-bottom: 16px;
+}
+
+.ps-progress-section { margin-bottom: 14px; }
+.ps-progress-labels {
+  display: flex; justify-content: space-between;
+  font-size: 11px; color: rgba(255,255,255,0.5); margin-bottom: 6px;
+}
+.ps-progress-track {
+  height: 8px; background: rgba(255,255,255,0.1);
+  border-radius: 4px; overflow: hidden;
+}
+.ps-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #cd7f32, #ffd700);
+  border-radius: 4px;
+  transition: width 0.5s ease;
+  width: 0%;
+}
+
+.ps-req-item {
+  text-align: center; font-size: 12px;
+  margin-bottom: 14px; padding: 8px;
+  background: rgba(255,255,255,0.05); border-radius: 6px;
+}
+
+.ps-action-btn {
+  width: 100%;
+  padding: 12px;
+  border-radius: 8px;
+  border: none;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  background: rgba(255,215,0,0.15);
+  color: rgba(255,215,0,0.5);
+  margin-bottom: 18px;
+  transition: all 0.2s;
+}
+.ps-action-btn.available {
+  background: linear-gradient(135deg, #ffd700, #ff8c00);
+  color: #111;
+}
+.ps-action-btn.available:hover { transform: scale(1.02); box-shadow: 0 4px 20px rgba(255,215,0,0.4); }
+.ps-action-btn.maxed { background: rgba(255,255,255,0.08); color: #aaa; }
+
+.ps-rare-header { font-size: 12px; font-weight: 600; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; }
+.ps-rare-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+.ps-rare-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.07);
+  font-size: 12px;
+  color: rgba(255,255,255,0.3);
+  filter: grayscale(0.8);
+}
+.ps-rare-item.owned {
+  background: rgba(136,238,255,0.08);
+  border-color: rgba(136,238,255,0.3);
+  color: #88eeff;
+  filter: none;
+}
+
+/* ── Prestige Ceremony ─────────────────────────────────────────── */
+.prestige-ceremony {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.85);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 700;
+  animation: pc-fadein 0.4s ease;
+}
+.prestige-ceremony.hidden { display: none; }
+@keyframes pc-fadein { from{opacity:0;transform:scale(0.9)} to{opacity:1;transform:scale(1)} }
+.pc-inner { text-align: center; }
+.pc-stars { font-size: 60px; animation: pc-spin 2s linear infinite; }
+@keyframes pc-spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+.pc-level {
+  font-size: 72px; font-weight: 900;
+  background: linear-gradient(135deg, #ffd700, #ff8c00);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  margin: 10px 0;
+}
+.pc-subtitle { font-size: 22px; color: #fff; font-weight: 600; margin-bottom: 8px; }
+.pc-mult { font-size: 15px; color: rgba(255,215,0,0.8); margin-bottom: 24px; }
+.pc-close {
+  padding: 10px 32px;
+  background: linear-gradient(135deg, #ffd700, #ff8c00);
+  color: #111; border: none; border-radius: 8px;
+  font-size: 15px; font-weight: 700; cursor: pointer;
+}
+.pc-close:hover { transform: scale(1.05); }
