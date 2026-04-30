@@ -29,7 +29,8 @@ import {
   sendChat,
   onChat,
 } from './network.js';
-import { onDig, getMoney, addMoney, getDepthAt, getMaterialAtDepth, ORES, rollOre, resetMining, generateOreDeposits } from './mining.js';
+import { onDig, getMoney, addMoney, getDepthAt, getMaterialAtDepth, ORES, rollOre, resetMining, generateOreDeposits,
+         initMining, tickParticles, tickCameraShake, triggerShake } from './mining.js';
 import { playerInventory, TOOLS } from './inventory.js';
 import { openShop, closeShop, isShopOpen, getNearestShop, setMoneyChangeCallback, SHOPS } from './shop.js';
 import {
@@ -148,6 +149,44 @@ let _lastDigTime = 0;
 const BASE_DIG_COOLDOWN = 550; // ms at digSpeed 1.0
 let _digNotifTimer = null;
 let _nearestShop   = null;
+let _punchProgress = 0;  // 0..1 — drives progress ring on crosshair
+
+// ── Layer transition banner ───────────────────────────────────
+function _showLayerTransitionBanner(layer) {
+  // Brief HUD flash + "You entered X — ⬇ Ym" message
+  const existing = document.getElementById('layerBanner');
+  const banner = existing || (() => {
+    const el = document.createElement('div');
+    el.id = 'layerBanner';
+    el.style.cssText = [
+      'position:fixed','bottom:120px','left:50%','transform:translateX(-50%)',
+      'background:rgba(0,0,0,0.75)','border-radius:8px','padding:8px 18px',
+      'font-family:inherit','font-size:14px','font-weight:600','color:#fff',
+      'pointer-events:none','z-index:400','opacity:0',
+      'transition:opacity 0.3s','white-space:nowrap',
+    ].join(';');
+    document.body.appendChild(el);
+    return el;
+  })();
+
+  const depth = Math.round(layer.minDepth);
+  banner.textContent = `${layer.emoji} You entered ${layer.name} — ⬇ ${depth}m`;
+  banner.style.borderLeft = `4px solid ${layer.hexColor}`;
+  banner.style.opacity = '1';
+
+  // Screen flash in layer colour
+  const flash = document.createElement('div');
+  flash.style.cssText = [
+    'position:fixed','inset:0','pointer-events:none','z-index:500',
+    `background:${layer.hexColor}22`,'transition:opacity 0.6s',
+  ].join(';');
+  document.body.appendChild(flash);
+  requestAnimationFrame(() => { flash.style.opacity = '0'; });
+  setTimeout(() => flash.remove(), 700);
+
+  clearTimeout(banner._timer);
+  banner._timer = setTimeout(() => { banner.style.opacity = '0'; }, 3500);
+}
 
 function _getDigCooldown() {
   const tool = playerInventory.getActiveTool();
@@ -198,6 +237,8 @@ async function init() {
 
   // Build the 3D world (terrain, lighting, fog, water)
   initWorld();
+  // Initialise particle pool and audio for dig physics
+  initMining();
   // Populate the scene (trees, rocks, cabin, plaza, etc.)
   initObjects();
 
@@ -326,6 +367,10 @@ function gameLoop(timestamp) {
   // 20-minute countdown tick
   _tickResetTimer(timestamp);
 
+  // Physics ticks for dig effects
+  tickParticles(dt);
+  tickCameraShake(camera, dt);
+
   renderer.draw(player, remotePlayers, timestamp);
 
   rafId = requestAnimationFrame(gameLoop);
@@ -440,6 +485,31 @@ function _updateUndergroundEscape() {
 //  HUD
 // ============================================================
 function updateHUD() {
+  // ── Progress ring (punch resistance visual) ───────────────
+  const ringCanvas = document.getElementById('progressRingCanvas');
+  if (ringCanvas) {
+    if (_punchProgress > 0 && _punchProgress < 1) {
+      ringCanvas.style.opacity = '1';
+      const rc = ringCanvas.getContext('2d');
+      rc.clearRect(0, 0, 72, 72);
+      // Background arc (dimmed)
+      rc.beginPath();
+      rc.arc(36, 36, 28, 0, Math.PI * 2);
+      rc.strokeStyle = 'rgba(255,255,255,0.15)';
+      rc.lineWidth   = 2.5;
+      rc.stroke();
+      // Progress arc (white, from top)
+      rc.beginPath();
+      rc.arc(36, 36, 28, -Math.PI / 2, -Math.PI / 2 + _punchProgress * Math.PI * 2);
+      rc.strokeStyle = 'rgba(255,255,255,0.85)';
+      rc.lineWidth   = 2.5;
+      rc.lineCap     = 'round';
+      rc.stroke();
+    } else {
+      ringCanvas.style.opacity = '0';
+    }
+  }
+
   hudPos.textContent  = `${player.x.toFixed(1)}, ${player.z.toFixed(1)}`;
   if (hudZone) hudZone.textContent = getZoneName(player.x, player.z);
 
@@ -1125,17 +1195,8 @@ function setupPointerLock() {
     console.warn('[Game] Pointer lock request denied.');
   });
 
-  // ── Underground teleport button ──────────────────────────
-  document.getElementById('ugTeleportBtn')?.addEventListener('click', e => {
-    e.stopPropagation();
-    if (player) {
-      player.x  = 0;
-      player.y  = 2.0;
-      player.z  = 5;
-      player.vy = 0;
-      player.onGround = false;
-    }
-  });
+  // ── Teleport Wheel (hold Y when underground) ─────────────
+  _setupTeleportWheel();
 }
 
 // ── Shared dig logic (used by mouse click AND E key) ─────────
@@ -1151,29 +1212,214 @@ function _performDig() {
     return;
   }
 
-  const EYE_H = 1.62;
+  const EYE_H     = 1.62;
   const digResult = onDig(player.x, player.y, player.z, player.yaw, player.pitch, EYE_H);
-  if (digResult) {
-    const itemId   = digResult.ore ? digResult.ore.id : digResult.layer.name;
-    const itemName = digResult.ore ? digResult.ore.name : digResult.layer.name;
-    const collected = playerInventory.addItem(itemId, itemName);
-    if (!collected) digResult.bagFull = true;
 
-    const broke = playerInventory.damageTool(1);
-    if (broke) digResult.toolBroke = true;
-
-    _showDigNotif(digResult);
-    _refreshHotbarSlot(playerInventory.activeSlot);
-    _updateInvCapacityUI();
-    _updateMoneyHUD(getMoney());
-  } else {
+  if (!digResult) {
     _showDigNotif(getZoneName(player.x, player.z) === 'Plaza' ? null : 'maxdepth');
+    _punchProgress = 0;
+    return;
+  }
+
+  // Camera shake — always, every punch
+  if (digResult.shakeAmt) triggerShake(digResult.shakeAmt);
+
+  // Progress ring HUD state
+  _punchProgress = digResult.punchProgress ?? 1;
+
+  if (digResult.partialHit) {
+    // Partial punch — no inventory change, no money, just feedback
+    _showDigNotif({ partialHit: true, layer: digResult.layer,
+                    hits: digResult.hits, maxHits: digResult.maxHits });
+    return;
+  }
+
+  // ── Full dig landed ─────────────────────────────────────
+  _punchProgress = 0;
+
+  const itemId    = digResult.ore ? digResult.ore.id   : digResult.layer.name;
+  const itemName  = digResult.ore ? digResult.ore.name : digResult.layer.name;
+  const collected = playerInventory.addItem(itemId, itemName);
+  if (!collected) digResult.bagFull = true;
+
+  const broke = playerInventory.damageTool(1);
+  if (broke) digResult.toolBroke = true;
+
+  _showDigNotif(digResult);
+  _refreshHotbarSlot(playerInventory.activeSlot);
+  _updateInvCapacityUI();
+  _updateMoneyHUD(getMoney());
+
+  // Record for teleport wheel "Last Dig" slot
+  recordLastDigPoint(player.x, player.z, digResult.depth);
+
+  // Layer-transition flourish
+  if (digResult.newLayer) {
+    _showLayerTransitionBanner(digResult.newLayer);
   }
 }
 
 // ============================================================
 //  CHAT
 // ============================================================
+// ============================================================
+//  TELEPORT WHEEL  (hold Y key — 3 slots: Plaza, Last Dig, Custom)
+// ============================================================
+let _tpWheelOpen    = false;
+let _tpHoldTimer    = null;
+let _tpLastDigX     = null;
+let _tpLastDigZ     = null;
+let _tpLastDigDepth = 0;
+let _tpCustomWaypoint = null;   // { x, z, depth, label } — set by Anchor item
+
+const TP_SLOTS_DEF = [
+  { id:'plaza',    icon:'🏛',  label:'Plaza',         fixed: true },
+  { id:'lastdig',  icon:'⛏',   label:'Last Dig',      fixed: false },
+  { id:'custom',   icon:'📍',  label:'Waypoint',      fixed: false },
+];
+
+function _buildTpWheel() {
+  const ring = document.getElementById('tpWheelRing');
+  if (!ring) return;
+  ring.innerHTML = '';
+
+  const depth   = getDepthAt(player.x, player.z);
+  const slots   = [...TP_SLOTS_DEF];
+  const count   = slots.length;
+  const R       = 110;  // px from centre
+
+  slots.forEach((slot, i) => {
+    const angle = (i / count) * Math.PI * 2 - Math.PI / 2;
+    const sx    = R * Math.cos(angle);
+    const sy    = R * Math.sin(angle);
+
+    const el = document.createElement('div');
+    el.className = 'tp-slot';
+    el.style.left = (140 + sx) + 'px';
+    el.style.top  = (140 + sy) + 'px';
+
+    const locked = (slot.id === 'lastdig'  && _tpLastDigX === null)
+                || (slot.id === 'custom'   && !_tpCustomWaypoint);
+
+    if (locked) el.classList.add('tp-locked');
+
+    let depthLabel = '';
+    if (slot.id === 'lastdig' && _tpLastDigX !== null) depthLabel = _tpLastDigDepth.toFixed(0) + 'm deep';
+    if (slot.id === 'custom'  && _tpCustomWaypoint)    depthLabel = _tpCustomWaypoint.depth.toFixed(0) + 'm';
+
+    // Deep teleport cost warning
+    let costLabel = '';
+    if (!locked) {
+      const targetDepth = slot.id === 'plaza' ? 0 : (slot.id === 'lastdig' ? _tpLastDigDepth : (_tpCustomWaypoint?.depth ?? 0));
+      if (targetDepth > 100 && slot.id !== 'plaza') costLabel = '💰 50 coins';
+    }
+
+    el.innerHTML = `<div class="tp-slot-icon">${slot.icon}</div>
+      <div class="tp-slot-label">${slot.id === 'custom' && _tpCustomWaypoint ? _tpCustomWaypoint.label : slot.label}</div>
+      ${depthLabel ? `<div class="tp-slot-depth">${depthLabel}</div>` : ''}
+      ${costLabel  ? `<div class="tp-slot-depth" style="color:#ffd700">${costLabel}</div>` : ''}`;
+
+    if (!locked) {
+      el.addEventListener('mouseenter', () => el.classList.add('tp-hovered'));
+      el.addEventListener('mouseleave', () => el.classList.remove('tp-hovered'));
+      el.addEventListener('click', () => _executeTeleport(slot.id));
+    }
+
+    ring.appendChild(el);
+  });
+}
+
+function _executeTeleport(slotId) {
+  _closeTpWheel();
+  if (!player) return;
+
+  // Cost check for deep teleports
+  const targetDepth = slotId === 'lastdig' ? _tpLastDigDepth
+                    : slotId === 'custom'  ? (_tpCustomWaypoint?.depth ?? 0)
+                    : 0;
+  if (targetDepth > 100 && slotId !== 'plaza') {
+    const cost = 50;
+    if (getMoney() < cost) {
+      _showLayerTransitionBanner({ name:'Insufficient coins (need 50)', hexColor:'#ff4444', emoji:'💰', minDepth:0 });
+      return;
+    }
+    addMoney(-cost);
+    _updateMoneyHUD(getMoney());
+  }
+
+  // Teleport animation — brief FOV widen then snap
+  const flash = document.createElement('div');
+  flash.className = 'tp-flash';
+  document.body.appendChild(flash);
+  requestAnimationFrame(() => {
+    flash.style.transition = 'background 0.15s';
+    flash.style.background = 'rgba(255,255,255,0.35)';
+  });
+  setTimeout(() => {
+    flash.style.transition = 'background 0.3s';
+    flash.style.background = 'rgba(255,255,255,0)';
+    setTimeout(() => flash.remove(), 350);
+  }, 150);
+
+  // Move player
+  if (slotId === 'plaza') {
+    player.x = 0; player.y = 2.0; player.z = 5;
+  } else if (slotId === 'lastdig' && _tpLastDigX !== null) {
+    player.x = _tpLastDigX; player.y = 2.0; player.z = _tpLastDigZ;
+  } else if (slotId === 'custom' && _tpCustomWaypoint) {
+    player.x = _tpCustomWaypoint.x; player.y = 2.0; player.z = _tpCustomWaypoint.z;
+  }
+  player.vy = 0;
+  player.onGround = false;
+}
+
+function _openTpWheel() {
+  if (_tpWheelOpen) return;
+  _tpWheelOpen = true;
+  document.exitPointerLock?.();
+  _buildTpWheel();
+  document.getElementById('teleportWheel')?.classList.remove('hidden');
+}
+
+function _closeTpWheel() {
+  if (!_tpWheelOpen) return;
+  _tpWheelOpen = false;
+  document.getElementById('teleportWheel')?.classList.add('hidden');
+}
+
+// Track last dig point for "Last Dig" slot
+function recordLastDigPoint(x, z, depth) {
+  _tpLastDigX     = x;
+  _tpLastDigZ     = z;
+  _tpLastDigDepth = depth;
+}
+
+function _setupTeleportWheel() {
+  // Hold Y to open wheel, release to close
+  document.addEventListener('keydown', e => {
+    if (e.code !== 'KeyY') return;
+    if (isChatOpen || isPauseOpen || isShopOpen()) return;
+    e.preventDefault();
+    if (!_tpWheelOpen) _openTpWheel();
+  });
+  document.addEventListener('keyup', e => {
+    if (e.code !== 'KeyY') return;
+    _closeTpWheel();
+    setTimeout(() => requestPointerLock(gameCanvas), 100);
+  });
+
+  // Escape closes the wheel
+  document.addEventListener('keydown', e => {
+    if (e.code === 'Escape' && _tpWheelOpen) { e.stopImmediatePropagation(); _closeTpWheel(); }
+  }, true);
+
+  // Keep the old button working as a quick Plaza teleport
+  document.getElementById('ugTeleportBtn')?.addEventListener('click', e => {
+    e.stopPropagation();
+    _executeTeleport('plaza');
+  });
+}
+
 function setupChat(name, colour) {
   document.addEventListener('keydown', e => {
     const binds  = window.WALKWORLD_BINDS || DEFAULT_BINDS;
@@ -1647,6 +1893,20 @@ function _showDigNotif(result) {
     el.className = 'dig-notif visible';
     clearTimeout(_digNotifTimer);
     _digNotifTimer = setTimeout(() => { el.className = 'dig-notif'; }, 2200);
+    return;
+  }
+
+  // Partial hit — layer not yet broken
+  if (result.partialHit) {
+    const { layer, hits, maxHits } = result;
+    const pips = '▓'.repeat(hits) + '░'.repeat(maxHits - hits);
+    el.innerHTML =
+      `<span style="color:${layer.hexColor}">${layer.emoji} ${layer.name}</span>` +
+      `<span style="color:#ccc;font-family:monospace;letter-spacing:2px"> ${pips}</span>` +
+      `<span style="color:#aaa"> ${hits}/${maxHits}</span>`;
+    el.className = 'dig-notif visible';
+    clearTimeout(_digNotifTimer);
+    _digNotifTimer = setTimeout(() => { el.className = 'dig-notif'; }, 900);
     return;
   }
 
