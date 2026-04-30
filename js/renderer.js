@@ -114,8 +114,10 @@ export class Renderer {
 
     // ── THREE.WebGLRenderer ──────────────────────────────────
     this.webgl = new THREE.WebGLRenderer({
-      canvas:    gameCanvas,
-      antialias: true,
+      canvas:           gameCanvas,
+      antialias:        true,
+      precision:        'mediump',   // halves uniform memory per variable
+      powerPreference:  'high-performance',
     });
     this.webgl.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.webgl.setSize(window.innerWidth, window.innerHeight);
