@@ -1,9 +1,11 @@
 // ============================================================
-//  WalkWorld 3D — layers.js  (PART 1 REWRITE)
+//  WalkWorld 3D — layers.js  (PART 3 REWRITE)
 //
-//  8-layer geological system with punch resistance.
-//  New layers: Sandstone (42-65m), Obsidian (110-160m), The Void (250m+)
-//  New ores:   Tin, Sapphire, Sunstone
+//  12-ore rebalanced system:
+//  • Depth bands per ore — ores only spawn within their valid range
+//  • Rebalanced ORE_TABLE — Dense Ore max ~3.5%, no layer exceeds 12%
+//  • 3 new ores: Tin (Sandstone), Sapphire (Obsidian), Sunstone (Void)
+//  • All probability values are cumulative thresholds for rollOre()
 // ============================================================
 
 export const LAYERS = [
@@ -57,95 +59,121 @@ export function getMaterialAtDepth(depth) {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  ORE DEFINITIONS  (12 ores)
+//  ORE DEFINITIONS  (12 ores, with depth bands)
+//
+//  depthBand: [minDepth, maxDepth] — ore will NOT spawn outside
+//  this range even if it appears in that layer's ORE_TABLE.
+//  Prevents farming exploits (e.g. reaching Diamond depth early).
 // ─────────────────────────────────────────────────────────────
 export const ORES = {
-  coal:        { id:'coal',        name:'Coal',         value:8,    color:0x222222, hexColor:'#555555', emoji:'🪨', rarity:'common',    label:'COMMON',    bgGlow:'rgba(80,80,80,0.4)',       homeLayer:'Stone',     desc:'Burns well' },
-  copper:      { id:'copper',      name:'Copper',       value:18,   color:0xCC6633, hexColor:'#CC6633', emoji:'🟠', rarity:'common',    label:'COMMON',    bgGlow:'rgba(204,102,51,0.4)',     homeLayer:'Clay',      desc:'Turns green over time' },
-  iron:        { id:'iron',        name:'Iron',         value:35,   color:0xBB8866, hexColor:'#BB8866', emoji:'🔩', rarity:'common',    label:'COMMON',    bgGlow:'rgba(187,136,102,0.45)',   homeLayer:'Stone',     desc:'Workhorse of metals' },
-  tin:         { id:'tin',         name:'Tin',          value:28,   color:0xC8C8AA, hexColor:'#C8C8AA', emoji:'🥈', rarity:'common',    label:'COMMON',    bgGlow:'rgba(200,200,170,0.4)',    homeLayer:'Sandstone', desc:'Dull but useful' },
-  gold:        { id:'gold',        name:'Gold',         value:90,   color:0xFFCC00, hexColor:'#FFCC00', emoji:'✨', rarity:'uncommon',  label:'UNCOMMON',  bgGlow:'rgba(255,204,0,0.5)',      homeLayer:'Sandstone', desc:'Shiny and valuable' },
-  emerald:     { id:'emerald',     name:'Emerald',      value:130,  color:0x00DD66, hexColor:'#00DD66', emoji:'💚', rarity:'uncommon',  label:'UNCOMMON',  bgGlow:'rgba(0,220,100,0.5)',      homeLayer:'Dark Stone',desc:'Vivid and striking' },
-  sapphire:    { id:'sapphire',    name:'Sapphire',     value:165,  color:0x4488FF, hexColor:'#4488FF', emoji:'💙', rarity:'uncommon',  label:'UNCOMMON',  bgGlow:'rgba(68,136,255,0.5)',     homeLayer:'Obsidian',  desc:'Deep blue clarity' },
-  ruby:        { id:'ruby',        name:'Ruby',         value:210,  color:0xFF2244, hexColor:'#FF2244', emoji:'❤️‍🔥', rarity:'rare',  label:'RARE',      bgGlow:'rgba(255,34,68,0.55)',     homeLayer:'Obsidian',  desc:'Fiery red gem' },
-  amethyst:    { id:'amethyst',    name:'Amethyst',     value:260,  color:0xAA44FF, hexColor:'#AA44FF', emoji:'💜', rarity:'rare',      label:'RARE',      bgGlow:'rgba(170,68,255,0.6)',     homeLayer:'Dense Ore', desc:'Regal purple crystal' },
-  diamond:     { id:'diamond',     name:'Diamond',      value:480,  color:0x88EEFF, hexColor:'#88EEFF', emoji:'💎', rarity:'epic',      label:'EPIC',      bgGlow:'rgba(136,238,255,0.65)',   homeLayer:'Dense Ore', desc:'The hardest thing here' },
-  void_crystal:{ id:'void_crystal',name:'Void Crystal', value:1000, color:0xCC00FF, hexColor:'#CC00FF', emoji:'🔮', rarity:'legendary', label:'LEGENDARY', bgGlow:'rgba(200,0,255,0.7)',      homeLayer:'The Void',  desc:'From beyond the world' },
-  sunstone:    { id:'sunstone',    name:'Sunstone',     value:3500, color:0xFFD700, hexColor:'#FFD700', emoji:'☀️', rarity:'mythic',    label:'MYTHIC',    bgGlow:'rgba(255,215,0,0.9)',      homeLayer:'The Void',  desc:'Warm light in absolute dark' },
+  coal:        { id:'coal',        name:'Coal',         value:8,    color:0x222222, hexColor:'#555555', emoji:'🪨', rarity:'common',    label:'COMMON',    bgGlow:'rgba(80,80,80,0.4)',       homeLayer:'Stone',     desc:'Burns well',                  depthBand:[0,   9999] },
+  copper:      { id:'copper',      name:'Copper',       value:18,   color:0xCC6633, hexColor:'#CC6633', emoji:'🟠', rarity:'common',    label:'COMMON',    bgGlow:'rgba(204,102,51,0.4)',     homeLayer:'Clay',      desc:'Turns green over time',       depthBand:[0,   65]   },
+  iron:        { id:'iron',        name:'Iron',         value:35,   color:0xBB8866, hexColor:'#BB8866', emoji:'🔩', rarity:'common',    label:'COMMON',    bgGlow:'rgba(187,136,102,0.45)',   homeLayer:'Stone',     desc:'Workhorse of metals',         depthBand:[0,   110]  },
+  tin:         { id:'tin',         name:'Tin',          value:28,   color:0xC8C8AA, hexColor:'#C8C8AA', emoji:'🥈', rarity:'common',    label:'COMMON',    bgGlow:'rgba(200,200,170,0.4)',    homeLayer:'Sandstone', desc:'Dull but useful',             depthBand:[30,  110]  },
+  gold:        { id:'gold',        name:'Gold',         value:90,   color:0xFFCC00, hexColor:'#FFCC00', emoji:'✨', rarity:'uncommon',  label:'UNCOMMON',  bgGlow:'rgba(255,204,0,0.5)',      homeLayer:'Sandstone', desc:'Shiny and valuable',          depthBand:[42,  100]  },
+  emerald:     { id:'emerald',     name:'Emerald',      value:130,  color:0x00DD66, hexColor:'#00DD66', emoji:'💚', rarity:'uncommon',  label:'UNCOMMON',  bgGlow:'rgba(0,220,100,0.5)',      homeLayer:'Dark Stone',desc:'Vivid and striking',          depthBand:[55,  160]  },
+  sapphire:    { id:'sapphire',    name:'Sapphire',     value:165,  color:0x4488FF, hexColor:'#4488FF', emoji:'💙', rarity:'uncommon',  label:'UNCOMMON',  bgGlow:'rgba(68,136,255,0.5)',     homeLayer:'Obsidian',  desc:'Deep blue clarity',           depthBand:[90,  250]  },
+  ruby:        { id:'ruby',        name:'Ruby',         value:210,  color:0xFF2244, hexColor:'#FF2244', emoji:'❤️‍🔥', rarity:'rare', label:'RARE',      bgGlow:'rgba(255,34,68,0.55)',     homeLayer:'Obsidian',  desc:'Fiery red gem',               depthBand:[90,  250]  },
+  amethyst:    { id:'amethyst',    name:'Amethyst',     value:260,  color:0xAA44FF, hexColor:'#AA44FF', emoji:'💜', rarity:'rare',      label:'RARE',      bgGlow:'rgba(170,68,255,0.6)',     homeLayer:'Dense Ore', desc:'Regal purple crystal',        depthBand:[140, 9999] },
+  diamond:     { id:'diamond',     name:'Diamond',      value:480,  color:0x88EEFF, hexColor:'#88EEFF', emoji:'💎', rarity:'epic',      label:'EPIC',      bgGlow:'rgba(136,238,255,0.65)',   homeLayer:'Dense Ore', desc:'The hardest thing here',      depthBand:[140, 250]  },
+  void_crystal:{ id:'void_crystal',name:'Void Crystal', value:1000, color:0xCC00FF, hexColor:'#CC00FF', emoji:'🔮', rarity:'legendary', label:'LEGENDARY', bgGlow:'rgba(200,0,255,0.7)',      homeLayer:'The Void',  desc:'From beyond the world',       depthBand:[250, 9999] },
+  sunstone:    { id:'sunstone',    name:'Sunstone',     value:3500, color:0xFFD700, hexColor:'#FFD700', emoji:'☀️', rarity:'mythic',    label:'MYTHIC',    bgGlow:'rgba(255,215,0,0.9)',      homeLayer:'The Void',  desc:'Warm light in absolute dark',  depthBand:[250, 9999] },
 };
 
 // ─────────────────────────────────────────────────────────────
-//  ORE PROBABILITY TABLES  (rebalanced — Dense Ore max ~8.5%)
+//  ORE PROBABILITY TABLE  (rebalanced for Part 3)
+//
+//  Values are CUMULATIVE thresholds [0,1] checked against Math.random().
+//  Lower entry = checked first = wins the roll when r < threshold.
+//  Design targets (per-punch chance, not per-hole):
+//    Common ores:    2–4 %   peak
+//    Uncommon ores:  1.5–2 % peak
+//    Rare ores:      0.8–1 % peak
+//    Epic ores:      0.3–0.5% peak
+//    Legendary ores: 0.1–0.2% peak
+//    Mythic ores:    0.03%  (Void only)
+//  No layer total exceeds 12%. Dense Ore ~3.5% (deep = rare but worth it).
+//  The vein system (mining.js) adds bonus guaranteed ores on top.
 // ─────────────────────────────────────────────────────────────
-const ORE_TABLE = {
+export const ORE_TABLE = {
   'Grass/Dirt': [
-    ['coal',   0.012],
-    ['copper', 0.015],
-  ],
+    // Trace amounts — reward curious new players
+    ['coal',   0.010],   //  1.0%
+    ['copper', 0.020],   //  1.0%
+  ],                     //  total: 2.0%
+
   'Clay': [
-    ['coal',   0.020],
-    ['copper', 0.048],
-    ['iron',   0.060],
-  ],
+    ['coal',   0.020],   //  2.0%
+    ['copper', 0.055],   //  3.5% ← Copper peak layer
+    ['iron',   0.075],   //  2.0%
+  ],                     //  total: 7.5%
+
   'Stone': [
-    ['coal',    0.055],
-    ['copper',  0.075],
-    ['iron',    0.115],
-    ['gold',    0.118],
-    ['emerald', 0.119],
-  ],
+    ['coal',   0.030],   //  3.0% ← Coal peak layer
+    ['copper', 0.046],   //  1.6% (trailing off from Clay)
+    ['iron',   0.086],   //  4.0% ← Iron peak layer
+    ['gold',   0.089],   //  0.3% (trace — depth band caps this at 42-100m)
+  ],                     //  total: 8.9%
+
   'Sandstone': [
-    ['coal',   0.015],
-    ['copper', 0.025],
-    ['tin',    0.055],
-    ['iron',   0.075],
-    ['gold',   0.095],
-  ],
+    ['coal',   0.010],   //  1.0%
+    ['copper', 0.020],   //  1.0%
+    ['tin',    0.050],   //  3.0% ← Tin peak layer
+    ['iron',   0.075],   //  2.5%
+    ['gold',   0.095],   //  2.0% ← Gold peak layer
+  ],                     //  total: 9.5%
+
   'Dark Stone': [
-    ['coal',        0.008],
-    ['iron',        0.025],
-    ['tin',         0.035],
-    ['gold',        0.075],
-    ['emerald',     0.105],
-    ['sapphire',    0.117],
-    ['ruby',        0.130],
-    ['amethyst',    0.135],
-    ['diamond',     0.137],
-    ['void_crystal',0.1375],
-  ],
+    ['iron',        0.015],   //  1.5%
+    ['tin',         0.028],   //  1.3%
+    ['gold',        0.040],   //  1.2% (depth band ends at 100m, won't spawn deep here)
+    ['emerald',     0.058],   //  1.8% ← Emerald peak layer
+    ['sapphire',    0.069],   //  1.1%
+    ['ruby',        0.077],   //  0.8%
+    ['amethyst',    0.082],   //  0.5%
+  ],                          //  total: 8.2%
+
   'Obsidian': [
-    ['iron',        0.015],
-    ['gold',        0.040],
-    ['emerald',     0.060],
-    ['sapphire',    0.074],
-    ['ruby',        0.084],
-    ['amethyst',    0.092],
-    ['diamond',     0.095],
-    ['void_crystal',0.0955],
-  ],
+    ['gold',        0.008],   //  0.8% (at cap — depth band 42-100m; won't spawn below 100m)
+    ['emerald',     0.018],   //  1.0%
+    ['sapphire',    0.032],   //  1.4% ← Sapphire peak layer
+    ['ruby',        0.042],   //  1.0% ← Ruby peak layer
+    ['amethyst',    0.049],   //  0.7%
+    ['diamond',     0.052],   //  0.3%
+  ],                          //  total: 5.2%
+
   'Dense Ore': [
-    ['gold',        0.018],
-    ['emerald',     0.030],
-    ['sapphire',    0.040],
-    ['ruby',        0.048],
-    ['amethyst',    0.056],
-    ['diamond',     0.0595],
-    ['void_crystal',0.0605],
-  ],
+    ['emerald',     0.008],   //  0.8%
+    ['sapphire',    0.016],   //  0.8%
+    ['ruby',        0.022],   //  0.6%
+    ['amethyst',    0.030],   //  0.8% ← Amethyst peak layer
+    ['diamond',     0.033],   //  0.3%  (depth band 140-250m)
+    ['void_crystal',0.035],   //  0.2%
+  ],                          //  total: 3.5%
+
   'The Void': [
-    ['amethyst',    0.012],
-    ['diamond',     0.018],
-    ['void_crystal',0.030],
-    ['sunstone',    0.0303],
-  ],
+    ['amethyst',    0.006],   //  0.6%
+    ['diamond',     0.009],   //  0.3%
+    ['void_crystal',0.021],   //  1.2% ← Void Crystal peak (hunting ground)
+    ['sunstone',    0.0213],  //  0.03% ← rarest thing in the game
+  ],                          //  total: 2.1%
 };
 
-export function rollOre(layerName) {
+// ─────────────────────────────────────────────────────────────
+//  rollOre — enforces depthBand so ores can't spawn out of range
+// ─────────────────────────────────────────────────────────────
+export function rollOre(layerName, currentDepth) {
   const table = ORE_TABLE[layerName];
   if (!table) return null;
   const r = Math.random();
   for (const [oreId, threshold] of table) {
-    if (r < threshold) return ORES[oreId];
+    if (r < threshold) {
+      const ore  = ORES[oreId];
+      const band = ore.depthBand;
+      // Depth band enforcement — reject out-of-range finds
+      if (currentDepth < band[0] || currentDepth > band[1]) return null;
+      return ore;
+    }
   }
   return null;
 }
