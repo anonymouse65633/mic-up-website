@@ -357,6 +357,7 @@ function _buildGlowingStone(cx, cz) {
   group.position.set(cx, 0, cz);
   _scene.add(group);
   _landmarks.push({ cx, cz, group, type: 'glowstone', mesh });
+}
 
 // ── Main generation ───────────────────────────────────────────
 
@@ -495,7 +496,7 @@ export function onInteractKey(px, py, pz) {
     if (dx*dx + dy*dy + dz*dz > INTERACT_REACH * INTERACT_REACH) continue;
 
     chest.opened = true;
-    chest.light.intensity = 0;
+    if (chest.light) chest.light.intensity = 0;
 
     // Animate lid opening (rotate lid child)
     const lid = chest.mesh.children[1];
