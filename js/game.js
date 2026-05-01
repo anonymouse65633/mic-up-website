@@ -414,7 +414,7 @@ async function init() {
   setupHotbar();
   setupInventory();
   setupShop();
-  buildMinimapCache();
+  // buildMinimapCache(); — renderer.js now handles minimap drawing
   buildMapWorldCanvas();
   setupMap();
   initAvatarPreview();
@@ -473,7 +473,7 @@ function gameLoop(timestamp) {
 
   updateHUD();
   updateCompass();
-  updateMinimap();
+  // updateMinimap(); — renderer.js now handles minimap drawing
   if (isMapOpen) drawMap();
   _updateUndergroundEscape();
 
