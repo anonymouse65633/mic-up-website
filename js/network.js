@@ -47,7 +47,7 @@ let _lastValidatedDepth = 0;
 
 export function validateDepthUpdate(newDepth) {
   const delta = Math.abs(newDepth - _lastValidatedDepth);
-  if (delta > MAX_DEPTH_JUMP && _lastValidatedDepth > 0) {
+  if (delta > MAX_DEPTH_JUMP && _lastValidatedDepth > 0 && newDepth > 0) {
     console.warn(`[Network] Suspicious depth jump: ${_lastValidatedDepth}→${newDepth}m (delta ${delta.toFixed(1)}m). Clamping.`);
     return false;
   }
