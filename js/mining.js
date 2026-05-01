@@ -316,8 +316,20 @@ export function tickCameraShake(camera, dt) {
 //  MAIN DIG API — punch resistance + full ore pipeline
 // ============================================================
 export function onDig(px, py, pz, yaw, pitch, eyeHeight) {
-  const surfaceY      = getBaseHeightAt(px, pz);
-  const shaft         = getShaftAt(px, pz);
+  // ── Directional dig target ──────────────────────────────────
+  // When looking more than ~20° below horizontal → dig straight down.
+  // Otherwise offset the target XZ in the look direction for sideways/forward digging.
+  const HORIZ_THRESHOLD = -0.35; // ~20° below horizontal
+  let targetX = px, targetZ = pz;
+  if (pitch > HORIZ_THRESHOLD) {
+    const cosP   = Math.cos(pitch);
+    const hReach = DIG_REACH * Math.max(0.4, cosP);
+    targetX = px - Math.sin(yaw) * hReach;
+    targetZ = pz - Math.cos(yaw) * hReach;
+  }
+
+  const surfaceY      = getBaseHeightAt(targetX, targetZ);
+  const shaft         = getShaftAt(targetX, targetZ);
   const currentFloorY = shaft ? shaft.floorY : surfaceY;
 
   // Preview depth to determine the layer the player is about to punch
@@ -325,7 +337,7 @@ export function onDig(px, py, pz, yaw, pitch, eyeHeight) {
   const layer        = getMaterialAtDepth(Math.max(0, previewDepth));
 
   // ── Punch resistance ────────────────────────────────────
-  const punchKey   = `${Math.round(px / MINE_CELL)},${Math.round(pz / MINE_CELL)}`;
+  const punchKey   = `${Math.round(targetX / MINE_CELL)},${Math.round(targetZ / MINE_CELL)}`;
   const maxPunches = Math.max(1, layer.punches ?? 1);
   let currentHits  = (_punchHits.get(punchKey) ?? 0) + 1;
   _punchHits.set(punchKey, currentHits);
@@ -341,9 +353,9 @@ export function onDig(px, py, pz, yaw, pitch, eyeHeight) {
   // ── Full break ──────────────────────────────────────────
   _punchHits.delete(punchKey);
 
-  const digX = px;
+  const digX = targetX;
   const digY = currentFloorY - (DIG_SPHERE_R * 0.45);
-  const digZ = pz;
+  const digZ = targetZ;
 
   const result = digSphere(digX, digY, digZ, DIG_SPHERE_R);
   if (!result) return null;
@@ -427,29 +439,6 @@ function _updateSphereVisuals(key, cx, cy, cz, radius, depth, surfaceY, ore, lay
   const group  = new THREE.Group();
   const floorY = cy - radius;
 
-  // Strata rings
-  const visibleLayers = LAYERS.filter(l => {
-    const bt = surfaceY - l.minDepth;
-    const bb = surfaceY - Math.min(depth, l.maxDepth);
-    return bt > bb;
-  });
-  for (const vl of visibleLayers) {
-    const bt = surfaceY - vl.minDepth;
-    const bb = surfaceY - Math.min(depth, vl.maxDepth);
-    if (bt - bb < 0.1) continue;
-    const midY = (bt + bb) * 0.5;
-    const relY = Math.max(-radius * 0.95, Math.min(radius * 0.95, midY - cy));
-    const ringR = Math.sqrt(Math.max(0, radius * radius - relY * relY));
-    if (ringR < 0.3) continue;
-    const t = new THREE.Mesh(
-      new THREE.TorusGeometry(ringR, 0.12, 6, 24, Math.PI * 2),
-      new THREE.MeshLambertMaterial({ color: vl.color, transparent: true, opacity: 0.85 }),
-    );
-    t.rotation.x = Math.PI / 2;
-    t.position.set(cx, midY, cz);
-    group.add(t);
-  }
-
   // Ore crystals
   let crystalData = null;
   if (ore) crystalData = _buildOreCrystalCluster(group, cx, floorY + 0.05, cz, ore, depth, oreSize);
@@ -504,10 +493,7 @@ function _buildOreCrystalCluster(group, cx, baseY, cz, ore, depth, oreSize = 1) 
       mesh.rotation.x = -Math.sin(angle) * 0.35 * rng();
       group.add(mesh); crystals.push(mesh);
     }
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.18 * sizeFactor, 0.025, 4, 18), mkMat(0.12, 0.75));
-    ring.rotation.x = Math.PI / 2;
-    ring.position.set(cx, baseY + 0.01, cz);
-    group.add(ring); pulseRings.push(ring);
+
 
   } else if (rarity === 'uncommon') {
     const mat = mkMat(0.65);
@@ -543,10 +529,6 @@ function _buildOreCrystalCluster(group, cx, baseY, cz, ore, depth, oreSize = 1) 
       group.add(satMesh);
       satellites.push({ mesh: satMesh, angle: (i / 2) * Math.PI * 2, dist: 0.30 * sizeFactor, speed: 1.1 + rng() * 0.4, baseY: baseY + sz + 0.06, tiltZ: 0.3 + rng() * 0.3 });
     }
-    const pulseMesh = new THREE.Mesh(new THREE.TorusGeometry(sz * 1.8, 0.03, 6, 24), mkMat(0.5, 0.7));
-    pulseMesh.rotation.x = Math.PI / 2;
-    pulseMesh.position.set(cx, baseY + sz + 0.06, cz);
-    group.add(pulseMesh); pulseRings.push(pulseMesh);
     // Emissive-only — no PointLight (prevents WebGL uniform overflow)
     // Higher emissiveIntensity compensates for the missing point light
 
