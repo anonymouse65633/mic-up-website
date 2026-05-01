@@ -8,25 +8,26 @@
 //    to / removed from the scene automatically
 //  • Overlay canvas       — name tags + chat bubbles projected
 //    from 3D world-space to 2D screen-space each frame
-//  • Minimap canvas       — circular, baked zone-colour BG +
-//    live player dots + local-player direction arrow
+//  • Minimap canvas       — uses the existing #minimapCanvas
+//    HTML element (circular via CSS). Draws baked zone-colour
+//    BG + live player dots + local-player direction arrow +
+//    optional depth strip overlay.
 //
 //  Public API
 //  ────────────────────────────────────────────────────────────
 //  new Renderer(gameCanvas)
 //  renderer.addBubble(playerId, text)
 //  renderer.draw(localPlayer, remotePlayers, timestamp)
-//
-//  game.js passes (gameCanvas, minimapCanvas) — the second arg
-//  is ignored; we create our own internal canvases.
 // ============================================================
 
 import { scene, WORLD_SIZE, HALF, getZoneName } from './world.js';
 import { camera }                                from './player.js';
 import { buildCharacter }                        from './character.js';
+import { getMinimapMode, drawDepthStrip }        from './ui.js';
+import { getDepthAt }                            from './mining.js';
 
 // ── Minimap constants ─────────────────────────────────────────
-const MINIMAP_SIZE = 130;   // px (displayed square, CSS clips to circle)
+const MINIMAP_SIZE = 110;   // px — matches #minimapCanvas CSS size
 const MINIMAP_RES  = 64;    // grid resolution for the baked background
 
 // Zone → fill colour for the baked minimap background
@@ -147,21 +148,24 @@ export class Renderer {
     });
 
     // ── Minimap canvas ───────────────────────────────────────
-    this._miniCanvas = _mkCanvas(`
-      position:absolute; top:70px; right:14px;
-      width:${MINIMAP_SIZE}px; height:${MINIMAP_SIZE}px;
-      border-radius:50%;
-      border:2px solid rgba(255,255,255,0.22);
-      box-shadow:0 0 8px rgba(0,0,0,0.5);
-      z-index:15; pointer-events:none;
-    `);
-    this._miniCanvas.width  = MINIMAP_SIZE;
-    this._miniCanvas.height = MINIMAP_SIZE;
-    this._miniCtx           = this._miniCanvas.getContext('2d');
-    wrapper.appendChild(this._miniCanvas);
+    // FIX: Use the existing #minimapCanvas HTML element instead of
+    // creating a second canvas (which caused the duplicate minimap bug).
+    this._miniCanvas = document.getElementById('minimapCanvas');
+    if (this._miniCanvas) {
+      // Bump internal resolution to match MINIMAP_SIZE for crisp drawing
+      this._miniCanvas.width  = MINIMAP_SIZE;
+      this._miniCanvas.height = MINIMAP_SIZE;
+      this._miniCtx           = this._miniCanvas.getContext('2d');
+    } else {
+      this._miniCtx = null;
+      console.warn('[Renderer] #minimapCanvas not found in DOM');
+    }
 
     // Bake the static zone-colour background (runs once)
-    this._minimapBg = this._bakeMinimap();
+    this._minimapBg = this._miniCtx ? this._bakeMinimap() : null;
+
+    // ── Zone label element ───────────────────────────────────
+    this._zoneLabel = document.getElementById('minimapZoneLabel');
 
     // ── Remote player state ──────────────────────────────────
     // { [id]: THREE.Group }
@@ -198,7 +202,7 @@ export class Renderer {
     // 2-D overlay
     this._drawOverlay(remotePlayers);
 
-    // Minimap
+    // Minimap (single draw — no duplicate)
     this._drawMinimap(localPlayer, remotePlayers);
 
     // Prune expired bubbles
@@ -384,13 +388,15 @@ export class Renderer {
 
   // ── Minimap: draw live frame ──────────────────────────────
   _drawMinimap(localPlayer, remotePlayers) {
+    if (!this._miniCtx) return;
+
     const ctx  = this._miniCtx;
     const size = MINIMAP_SIZE;
     const half = size / 2;
 
     ctx.clearRect(0, 0, size, size);
 
-    // Circular clip
+    // Circular clip (canvas-side clip; CSS overflow:hidden also clips)
     ctx.save();
     ctx.beginPath();
     ctx.arc(half, half, half, 0, Math.PI * 2);
@@ -441,6 +447,17 @@ export class Renderer {
     ctx.restore();
 
     ctx.restore(); // remove circular clip
+
+    // ── Depth strip overlay (when mode = 'depth') ────────────
+    if (getMinimapMode() === 'depth') {
+      const pd = getDepthAt(localPlayer.x, localPlayer.z);
+      drawDepthStrip(ctx, size, size, pd > 0 ? pd : 0);
+    }
+
+    // ── Zone label ────────────────────────────────────────────
+    if (this._zoneLabel) {
+      this._zoneLabel.textContent = getZoneName(localPlayer.x, localPlayer.z);
+    }
   }
 
   // ── Internal helpers ──────────────────────────────────────
