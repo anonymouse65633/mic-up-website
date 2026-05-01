@@ -226,6 +226,76 @@ const _sphereMeshes = new Map();
 const _punchHits = new Map();
 
 // ============================================================
+//  3-D VOXEL GRID  (invisible boxes — used for directional dig)
+//
+//  The world is divided into VOXEL×VOXEL×VOXEL cubes.
+//  A voxel is "solid" (diggable) when:
+//    1. Its centre Y is below the terrain surface at that XZ.
+//    2. It has not yet been dug (not in _dugVoxels).
+//  When the player digs, a DDA ray marches from the camera eye
+//  in the exact look direction, finds the first solid voxel,
+//  and calls digSphere() at that voxel's centre.
+// ============================================================
+const VOXEL     = 3.0;          // cube side length (≈ DIG_SPHERE_R * 1.3)
+const DIG_MAX_STEPS = 24;       // safety cap on DDA iterations
+
+const _dugVoxels = new Set();   // "vx,vy,vz" → dug
+
+function _vKey(vx, vy, vz)  { return `${vx},${vy},${vz}`; }
+function _wToV(w, size)      { return Math.floor(w / size); }
+
+function _voxelCentre(vx, vy, vz) {
+  return { x: (vx + 0.5) * VOXEL, y: (vy + 0.5) * VOXEL, z: (vz + 0.5) * VOXEL };
+}
+
+/** Returns true when the voxel at (vx,vy,vz) is solid (underground + undig). */
+function _isVoxelSolid(vx, vy, vz) {
+  if (_dugVoxels.has(_vKey(vx, vy, vz))) return false;
+  const c = _voxelCentre(vx, vy, vz);
+  const surfaceY = getBaseHeightAt(c.x, c.z);
+  // Voxel must be fully below the surface (top edge below surfaceY)
+  const voxelTop = (vy + 1) * VOXEL;
+  return voxelTop < surfaceY;
+}
+
+/**
+ * DDA 3-D raycast through the voxel grid.
+ * Returns { vx, vy, vz } for the first solid voxel hit, or null.
+ * ox/oy/oz = ray origin; dx/dy/dz = normalised direction; maxDist = reach.
+ */
+function _ddaRaycast(ox, oy, oz, dx, dy, dz, maxDist) {
+  let vx = _wToV(ox, VOXEL);
+  let vy = _wToV(oy, VOXEL);
+  let vz = _wToV(oz, VOXEL);
+
+  const sX = dx > 0 ? 1 : -1,  sY = dy > 0 ? 1 : -1,  sZ = dz > 0 ? 1 : -1;
+  const adx = Math.abs(dx), ady = Math.abs(dy), adz = Math.abs(dz);
+
+  const tDX = adx > 1e-9 ? VOXEL / adx : Infinity;
+  const tDY = ady > 1e-9 ? VOXEL / ady : Infinity;
+  const tDZ = adz > 1e-9 ? VOXEL / adz : Infinity;
+
+  // Distance to first crossing in each axis
+  let tMX = adx > 1e-9 ? (sX > 0 ? (vx + 1) * VOXEL - ox : ox - vx * VOXEL) / adx : Infinity;
+  let tMY = ady > 1e-9 ? (sY > 0 ? (vy + 1) * VOXEL - oy : oy - vy * VOXEL) / ady : Infinity;
+  let tMZ = adz > 1e-9 ? (sZ > 0 ? (vz + 1) * VOXEL - oz : oz - vz * VOXEL) / adz : Infinity;
+
+  for (let i = 0; i < DIG_MAX_STEPS; i++) {
+    const t = Math.min(tMX, tMY, tMZ);
+    if (t > maxDist) break;
+
+    if (_isVoxelSolid(vx, vy, vz)) return { vx, vy, vz };
+
+    if (tMX <= tMY && tMX <= tMZ) { tMX += tDX; vx += sX; }
+    else if (tMY <= tMZ)           { tMY += tDY; vy += sY; }
+    else                           { tMZ += tDZ; vz += sZ; }
+  }
+  // Last-chance: check the final voxel we landed in
+  if (_isVoxelSolid(vx, vy, vz)) return { vx, vy, vz };
+  return null;
+}
+
+// ============================================================
 //  PARTICLE POOL  (60 pre-allocated debris meshes)
 // ============================================================
 const POOL_SIZE        = 60;
@@ -316,30 +386,42 @@ export function tickCameraShake(camera, dt) {
 //  MAIN DIG API — punch resistance + full ore pipeline
 // ============================================================
 export function onDig(px, py, pz, yaw, pitch, eyeHeight) {
-  // ── Directional dig target ──────────────────────────────────
-  // When looking more than ~20° below horizontal → dig straight down.
-  // Otherwise offset the target XZ in the look direction for sideways/forward digging.
-  const HORIZ_THRESHOLD = -0.35; // ~20° below horizontal
-  let targetX = px, targetZ = pz;
-  if (pitch > HORIZ_THRESHOLD) {
-    const cosP   = Math.cos(pitch);
-    const hReach = DIG_REACH * Math.max(0.4, cosP);
-    targetX = px - Math.sin(yaw) * hReach;
-    targetZ = pz - Math.cos(yaw) * hReach;
+  // ── 1. DDA ray from player eye in exact look direction ──────────────
+  const cosP = Math.cos(pitch);
+  const lx   = -Math.sin(yaw) * cosP;
+  const ly   =  Math.sin(pitch);
+  const lz   = -Math.cos(yaw) * cosP;
+
+  const hitVoxel = _ddaRaycast(px, py + eyeHeight, pz, lx, ly, lz, DIG_REACH);
+
+  // ── 2. Resolve dig position ─────────────────────────────────────────
+  let digX, digY, digZ, targetX, targetZ;
+  if (hitVoxel) {
+    const c = _voxelCentre(hitVoxel.vx, hitVoxel.vy, hitVoxel.vz);
+    digX = c.x; digY = c.y; digZ = c.z;
+    targetX = digX; targetZ = digZ;
+  } else {
+    targetX = px; targetZ = pz;
+    const sY     = getBaseHeightAt(px, pz);
+    const shaft  = getShaftAt(px, pz);
+    const floorY = shaft ? shaft.floorY : sY;
+    digX = px; digY = floorY - (DIG_SPHERE_R * 0.45); digZ = pz;
   }
 
   const surfaceY      = getBaseHeightAt(targetX, targetZ);
   const shaft         = getShaftAt(targetX, targetZ);
   const currentFloorY = shaft ? shaft.floorY : surfaceY;
 
-  // Preview depth to determine the layer the player is about to punch
-  const previewDepth = surfaceY - currentFloorY + DIG_SPHERE_R * 0.9;
+  const previewDepth = surfaceY - (hitVoxel ? digY : currentFloorY) + DIG_SPHERE_R * 0.9;
   const layer        = getMaterialAtDepth(Math.max(0, previewDepth));
 
-  // ── Punch resistance ────────────────────────────────────
-  const punchKey   = `${Math.round(targetX / MINE_CELL)},${Math.round(targetZ / MINE_CELL)}`;
-  const maxPunches = Math.max(1, layer.punches ?? 1);
-  let currentHits  = (_punchHits.get(punchKey) ?? 0) + 1;
+  // ── 3. Punch resistance ─────────────────────────────────────────────
+  const punchKey = hitVoxel
+    ? _vKey(hitVoxel.vx, hitVoxel.vy, hitVoxel.vz)
+    : `${Math.round(targetX / MINE_CELL)},${Math.round(targetZ / MINE_CELL)}`;
+
+  const maxPunches  = Math.max(1, layer.punches ?? 1);
+  let   currentHits = (_punchHits.get(punchKey) ?? 0) + 1;
   _punchHits.set(punchKey, currentHits);
 
   const punchProgress = Math.min(currentHits / maxPunches, 1);
@@ -350,12 +432,9 @@ export function onDig(px, py, pz, yaw, pitch, eyeHeight) {
     return { partialHit: true, layer, hits: currentHits, maxHits: maxPunches, punchProgress, shakeAmt };
   }
 
-  // ── Full break ──────────────────────────────────────────
+  // ── 4. Full break ────────────────────────────────────────────────────
   _punchHits.delete(punchKey);
-
-  const digX = targetX;
-  const digY = currentFloorY - (DIG_SPHERE_R * 0.45);
-  const digZ = targetZ;
+  if (hitVoxel) _dugVoxels.add(_vKey(hitVoxel.vx, hitVoxel.vy, hitVoxel.vz));
 
   const result = digSphere(digX, digY, digZ, DIG_SPHERE_R);
   if (!result) return null;
@@ -420,6 +499,7 @@ export function resetMining() {
   }
   _sphereMeshes.clear();
   _punchHits.clear();
+  _dugVoxels.clear();
   _money = 0;
   _activeParticles.forEach(p => { p.mesh.visible = false; });
   _activeParticles.length = 0;
