@@ -2148,6 +2148,11 @@ function setupPauseMenu() {
   // ── Resume ───────────────────────────────────────────────
   document.getElementById('pmResume')?.addEventListener('click', closePauseMenu);
 
+  // ── Backdrop click closes menu ────────────────────────────
+  pauseMenu.addEventListener('click', (e) => {
+    if (e.target === pauseMenu) closePauseMenu();
+  });
+
   // ── Leave ────────────────────────────────────────────────
   document.getElementById('pmLeave')?.addEventListener('click', () => {
     window.location.href = 'index.html';
